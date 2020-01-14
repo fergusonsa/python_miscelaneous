@@ -98,11 +98,24 @@ def search_directory(dir_path, patterns):
                     results[key] = dir_results[key]
 
     return results
+def get_log_file_path():
+    log_file_path = os.path.join('/cygdrive/c/dev/hague/id_filing_workspace', 'check_message_keys_{}.txt'.format(datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')))
+    count = 0
+    while os.path.isfile(log_file_path) and count < 2000:
+        log_file_path = os.path.join('/cygdrive/c/dev/hague/id_filing_workspace', 'check_message_keys_{}.txt'.format(datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')))
+        count += 1
+    return log_file_path
 
+def print_and_log(message, log_file_h=None):
+    if log_file_h:
+        print(message + "\n", file=log_file_h)
+    print(message)
+        
 def main2():
-    root_path = '/cygdrive/c/dev/workspace'
+    root_path = '/cygdrive/c/dev/hague/id_filing_workspace/cipo-ec-id-filing/CIPO-ec-id-filing-web'
+    # root_path = '/cygdrive/c/dev/hague/id_filing_workspace/cipo-ec-id-mailbox/CIPO-ec-id-mailbox-web'
     jsp_root_path = os.path.join(root_path, 'src','main','webapp','WEB-INF', 'views', 'jsp')
-    jsp_sub_folders = ['common', 'mailbox', 'access', 'fields']
+    jsp_sub_folders = ['common', 'mailbox', 'eaccess', 'application', 'amendment', 'fields']
     properties_path = os.path.join(root_path, 'src','main','resources','messages.properties')
     properties_fr_path = os.path.join(root_path, 'src','main','resources','messages_fr.properties')
 
@@ -122,58 +135,36 @@ def main2():
     s_missing_fr_required_keys = s_required_keys - s_fr_patterns
     s_missing_all_required_keys = s_required_keys - s_all_patterns
     
-    log_file_path = os.path.join(root_path, 'check_message_keys_{}.txt'.format(datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')))
-    count = 0
-    while os.path.isfile(log_file_path) and count < 2000:
-        log_file_path = os.path.join(root_path, 'check_message_keys_{}.txt'.format(datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')))
-        count += 1
+    log_file_path = get_log_file_path()
     with open(log_file_path, 'w') as log_file_h:
-        print('Found {} keys in the file {}.\n'.format(len(en_patterns), properties_path), file=log_file_h)
-        print('Found {} keys in the file {}.'.format(len(en_patterns), properties_path))
-        print('Found {} keys in the file {}.\n'.format(len(fr_patterns), properties_fr_path), file=log_file_h)
-        print('Found {} keys in the file {}.'.format(len(fr_patterns), properties_fr_path))
-        print('Found {} unique keys in the files {} and {}.\n'.format(len(fr_patterns), properties_path, properties_fr_path), file=log_file_h)
-        print('Found {} unique keys in the files {} and {}.'.format(len(s_all_patterns), properties_path, properties_fr_path))
+        print_and_log('Found {} keys in the file {}.'.format(len(en_patterns), properties_path), log_file_h)
+        print_and_log('Found {} keys in the file {}.'.format(len(fr_patterns), properties_fr_path), log_file_h)
+        print_and_log('Found {} unique keys in the files {} and {}.'.format(len(s_all_patterns), properties_path, properties_fr_path), log_file_h)
 
-        print('\nFound {} keys with occurences in jsp files in {}.\n'.format(len(used_keys), jsp_root_path), file=log_file_h)
-        print('\nFound {} keys with occurences in jsp files in {}.'.format(len(used_keys), jsp_root_path))
+        print_and_log('\nFound {} keys with occurences in jsp files in {}.'.format(len(used_keys), jsp_root_path), log_file_h)
 
-        print('\nListing of required message keys that are used in jsps and are not present in any message properties files:')
-        print('\nListing of required message keys that are used in jsps and are not present in any message properties files:\n', file=log_file_h)
+        print_and_log('\nListing of required message keys that are used in jsps and are not present in any message properties files:', log_file_h)
         for key in sorted(s_missing_all_required_keys):
-            print('    {} in {} jsp files'.format(key, len(used_keys[key])))
-            print('    {} in {} jsp files'.format(key, len(used_keys[key])), file=log_file_h)
+            print_and_log('    {} in {} jsp files'.format(key, len(used_keys[key])), log_file_h)
                 
-        print('\nListing of required message keys that are used in jsps and are not present in the English message properties file:')
-        print('\nListing of required message keys that are used in jsps and are not present in the English message properties file:\n', file=log_file_h)
+        print_and_log('\nListing of required message keys that are used in jsps and are not present in the English message properties file:', log_file_h)
         for key in sorted(s_missing_en_required_keys):
             print('    {} in {} jsp files'.format(key, len(used_keys[key])))
             print('    {} in {} jsp files'.format(key, len(used_keys[key])), file=log_file_h)
                 
-        print('\nListing of required message keys that are used in jsps and are not present in the French message properties file:')
-        print('\nListing of required message keys that are used in jsps and are not present in the French message properties file:\n', file=log_file_h)
+        print_and_log('\nListing of required message keys that are used in jsps and are not present in the French message properties file:', log_file_h)
         for key in sorted(s_missing_fr_required_keys):
-            print('    {} in {} jsp files'.format(key, len(used_keys[key])))
-            print('    {} in {} jsp files'.format(key, len(used_keys[key])), file=log_file_h)
-        
-        
+            print_and_log('    {} in {} jsp files'.format(key, len(used_keys[key])), log_file_h)
         
     print('\n\nLog file: {}'.format(log_file_path))
 
-def main():
-
-    root_path = '/cygdrive/c/dev/workspace'
+def main(root_path):
     jsp_root_path = os.path.join(root_path, 'src', 'main', 'webapp', 'WEB-INF', 'views', 'jsp')
-    jsp_sub_folders = ['common', 'mailbox', 'access', 'fields']
-    file_name = 'authorize.jsp'
+    jsp_sub_folders = ['common', 'mailbox', 'eaccess', 'application', 'amendment', 'fields']
+
     properties_path = os.path.join(root_path, 'src','main','resources','messages.properties')
     properties_fr_path = os.path.join(root_path, 'src','main','resources','messages_fr.properties')
-    log_file_path = os.path.join(root_path, 'check_message_keys_{}.txt'.format(datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')))
-    count = 0
-    while os.path.isfile(log_file_path) and count < 2000:
-        log_file_path = os.path.join(root_path, 'check_message_keys_{}.txt'.format(datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')))
-        count += 1
-
+        
     used_keys = find_messages_used_in_jsp(jsp_root_path)  
     s_required_keys = set(used_keys.keys())
     
@@ -189,46 +180,35 @@ def main():
     s_missing_en_required_keys = s_required_keys - s_en_patterns
     s_missing_fr_required_keys = s_required_keys - s_fr_patterns
     s_missing_all_required_keys = s_required_keys - s_all_patterns
-        
+
+    log_file_path = get_log_file_path()        
     with open(log_file_path, 'w') as log_file_h:
-        print('Found {} keys in the file {}.\n'.format(len(en_patterns), properties_path), file=log_file_h)
-        print('Found {} keys in the file {}.'.format(len(en_patterns), properties_path))
-        print('Found {} keys in the file {}.\n'.format(len(fr_patterns), properties_fr_path), file=log_file_h)
-        print('Found {} keys in the file {}.'.format(len(fr_patterns), properties_fr_path))
-        print('Found {} unique keys in the files {} and {}.\n'.format(len(fr_patterns), properties_path, properties_fr_path), file=log_file_h)
-        print('Found {} unique keys in the files {} and {}.'.format(len(s_all_patterns), properties_path, properties_fr_path))
+        print_and_log('Found {} keys in the file {}.'.format(len(en_patterns), properties_path), log_file_h)
+        print_and_log('Found {} keys in the file {}.'.format(len(fr_patterns), properties_fr_path), log_file_h)
+        print_and_log('Found {} unique keys in the files {} and {}.'.format(len(s_all_patterns), properties_path, properties_fr_path), log_file_h)
     
-        print('\nFound {} keys with occurences in jsp files in {}.\n'.format(len(used_keys), jsp_root_path), file=log_file_h)
-        print('\nFound {} keys with occurences in jsp files in {}.'.format(len(used_keys), jsp_root_path))
+        print_and_log('\nFound {} keys with occurences in jsp files in {}.'.format(len(used_keys), jsp_root_path), log_file_h)
         
-        print('\nListing of {} required message keys that are used in jsps and are not present in any message properties files:'.format(len(s_missing_all_required_keys)))
-        print('\nListing of {} required message keys that are used in jsps and are not present in any message properties files:\n'.format(len(s_missing_all_required_keys)), file=log_file_h)
+        print_and_log('\nListing of {} required message keys that are used in jsps and are not present in any message properties files:'.format(len(s_missing_all_required_keys)), log_file_h)
         for key in sorted(s_missing_all_required_keys):
-            print('    {:<45} in {} jsp files: {}'.format(key, len(used_keys[key]), used_keys[key]))
-            print('    {:<45} in {} jsp files: {}'.format(key, len(used_keys[key]), used_keys[key]), file=log_file_h)
+            print_and_log('    {:<45} in {} jsp files: {}'.format(key, len(used_keys[key]), used_keys[key]), log_file_h)
                 
-        print('\nListing of {} required message keys that are used in jsps and are not present in the English message properties file:'.format(len(s_missing_en_required_keys)))
-        print('\nListing of {} required message keys that are used in jsps and are not present in the English message properties file:\n'.format(len(s_missing_en_required_keys)), file=log_file_h)
+        print_and_log('\nListing of {} required message keys that are used in jsps and are not present in the English message properties file:'.format(len(s_missing_en_required_keys)), log_file_h)
         for key in sorted(s_missing_en_required_keys):
-            print('    {:<45} in {} jsp files: {}'.format(key, len(used_keys[key]), used_keys[key]))
-            print('    {:<45} in {} jsp files: {}'.format(key, len(used_keys[key]), used_keys[key]), file=log_file_h)
+            print_and_log('    {:<45} in {} jsp files: {}'.format(key, len(used_keys[key]), used_keys[key]), log_file_h)
                 
-        print('\nListing of {} required message keys that are used in jsps and are not present in the French message properties file:'.format(len(s_missing_fr_required_keys)))
-        print('\nListing of {} required message keys that are used in jsps and are not present in the French message properties file:\n'.format(len(s_missing_fr_required_keys)), file=log_file_h)
+        print_and_log('\nListing of {} required message keys that are used in jsps and are not present in the French message properties file:'.format(len(s_missing_fr_required_keys)), log_file_h)
         for key in sorted(s_missing_fr_required_keys):
-            print('    {:<45} in {} jsp files: {}'.format(key, len(used_keys[key]), used_keys[key]))
-            print('    {:<45} in {} jsp files: {}'.format(key, len(used_keys[key]), used_keys[key]), file=log_file_h)
+            print_and_log('    {:<45} in {} jsp files: {}'.format(key, len(used_keys[key]), used_keys[key]), log_file_h)
 
         results = search_directory(jsp_root_path, all_patterns)
-        print('\nFound {} keys with occurences in jsp files in {}.\n'.format(len(results), jsp_root_path), file=log_file_h)
-        print('\nFound {} keys with occurences in jsp files in {}.'.format(len(results), jsp_root_path))
+        print_and_log('\nFound {} keys with occurences in jsp files in {}.'.format(len(results), jsp_root_path), log_file_h)
         
         for sub_dir in jsp_sub_folders:
             sub_path = os.path.join(jsp_root_path, sub_dir)
             if os.path.isdir(sub_path):
                 additional_results = search_directory(sub_path, all_patterns)
-                print('Found {} keys with occurences in jsp files in {}.\n'.format(len(additional_results), sub_path), file=log_file_h)
-                print('Found {} keys with occurences in jsp files in {}.'.format(len(additional_results), sub_path))
+                print_and_log('Found {} keys with occurences in jsp files in {}.'.format(len(additional_results), sub_path), log_file_h)
                 for key in additional_results.keys():
                     if key in results:
                         results[key].extend(additional_results[key])
@@ -237,66 +217,51 @@ def main():
 
         used_patterns = sorted(results.keys())
         s_used_patterns = set(used_patterns)
-        print('\n\nChecking message keys in the files: \n    {}\n    {}\n'.format(properties_path, properties_fr_path), file=log_file_h)  
-        print('Checking key usage in the jsp files in: {}'.format(jsp_root_path), file=log_file_h)
-        print('\n\nChecking message keys in the files: \n    {}\n    {}\n'.format(properties_path, properties_fr_path))  
-        print('Checking key usage in the jsp files in: {}'.format(jsp_root_path))
+        print_and_log('\n\nChecking message keys in the files: \n    {}\n    {}\n'.format(properties_path, properties_fr_path), log_file_h)  
+        print_and_log('Checking key usage in the jsp files in: {}'.format(jsp_root_path), log_file_h)
         
-        print('\nListing of message keys that are used and the files that use them:')
-        print('\nListing of message keys that are used and the files that use them:', file=log_file_h)
+        print_and_log('\nListing of message keys that are used and the files that use them:', log_file_h)
         for key in used_patterns:
-            print('\nPattern "{}":'.format(key))
-            print('\nPattern "{}":'.format(key), file=log_file_h)
+            print_and_log('\nPattern "{}":'.format(key), log_file_h)
             for val in sorted(results[key]):
-                print('    {}'.format(val))
-                print('    {}'.format(val), file=log_file_h)
+                print_and_log('    {}'.format(val), log_file_h)
                 
-        print('\nListing of message keys that are used and the files that use them:')
-        print('\nListing of message keys that are used and the files that use them:', file=log_file_h)
+        print_and_log('\nListing of message keys that are used and the files that use them:', log_file_h)
         for key in used_patterns:
-            print('{},"{}","{}"'.format(key, en_messages.get(key), fr_messages.get(key)))
-            print('{},"{}","{}"'.format(key, en_messages.get(key), fr_messages.get(key)), file=log_file_h)
+            print_and_log('{},"{}","{}"'.format(key, en_messages.get(key), fr_messages.get(key)), log_file_h)
 
-        print('\n\n\nListing of message keys that are NOT used:')
-        print('\n\n\nListing of message keys that are NOT used:', file=log_file_h)
+        print_and_log('\n\n\nListing of message keys that are NOT used:', log_file_h)
         for key in sorted(s_all_patterns - s_used_patterns):
-            print('    {}'.format(key))
-            print('    {}'.format(key), file=log_file_h)
+            print_and_log('    {}'.format(key), log_file_h)
 
         unused_patterns = sorted(s_en_patterns - s_used_patterns)
-        print('\n\n\nListing of {} message keys that are not used in {}:'.format(len(unused_patterns), properties_path))
-        print('\n\n\nListing of {} message keys that are not used in {}:'.format(len(unused_patterns), properties_path), file=log_file_h)
+        print_and_log('\n\n\nListing of {} message keys that are not used in {}:'.format(len(unused_patterns), properties_path), log_file_h)
 
         for key in unused_patterns:
-            print('    {}'.format(key))
-            print('    {}'.format(key), file=log_file_h)
+            print_and_log('    {}'.format(key), log_file_h)
         
         unused_patterns = sorted(s_fr_patterns - s_used_patterns)
-        print('\n\n\nListing of {} message keys that are not used in {}:'.format(len(unused_patterns), properties_fr_path))
-        print('\n\n\nListing of {} message keys that are not used in {}:'.format(len(unused_patterns), properties_fr_path), file=log_file_h)
+        print_and_log('\n\n\nListing of {} message keys that are not used in {}:'.format(len(unused_patterns), properties_fr_path), log_file_h)
 
         for key in unused_patterns:
-            print('    {}'.format(key))
-            print('    {}'.format(key), file=log_file_h)
+            print_and_log('    {}'.format(key), log_file_h)
             
         missing = sorted(s_en_patterns - s_fr_patterns)
-        print('\n\n\nListing of {} message keys that are in the {} and not in {}:'.format(len(missing), properties_path, properties_fr_path))
-        print('\n\n\nListing of {} message keys that are in the {} and not in {}:'.format(len(missing), properties_path, properties_fr_path), file=log_file_h)
+        print_and_log('\n\n\nListing of {} message keys that are in the {} and not in {}:'.format(len(missing), properties_path, properties_fr_path), log_file_h)
 
         for key in missing:
-            print('    {}'.format(key))
-            print('    {}'.format(key), file=log_file_h)
-        
-        
+            print_and_log('    {}'.format(key), log_file_h)
+               
         missing = sorted(s_fr_patterns - s_en_patterns)
-        print('\n\n\nListing of {} message keys that are in the {} and not in {}:'.format(len(missing), properties_fr_path, properties_path))
-        print('\n\n\nListing of {} message keys that are in the {} and not in {}:'.format(len(missing), properties_fr_path, properties_path), file=log_file_h)
+        print_and_log('\n\n\nListing of {} message keys that are in the {} and not in {}:'.format(len(missing), properties_fr_path, properties_path), log_file_h)
         for key in sorted(s_fr_patterns - s_en_patterns):
-            print('    {}'.format(key))
-            print('    {}'.format(key), file=log_file_h)
-            
-            
+            print_and_log('    {}'.format(key), log_file_h)
+                        
     print('\n\nLog file: {}'.format(log_file_path))
     
 if __name__ == "__main__":
-    main2()
+    root_path = '/cygdrive/c/dev/hague/id_filing_workspace/cipo-ec-id-filing/CIPO-ec-id-filing-web'
+    root_path = '/cygdrive/c/dev/hague/new_workspace/cipo-ec-id-filing/CIPO-ec-id-filing-web'
+    # root_path = '/cygdrive/c/dev/hague/id_filing_workspace/cipo-ec-id-eaccess/CIPO-ec-id-eaccess-web'
+    # root_path = '/cygdrive/c/dev/hague/id_filing_workspace/cipo-ec-id-mailbox/CIPO-ec-id-mailbox-web'
+    main(root_path)

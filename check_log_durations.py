@@ -1,8 +1,12 @@
 import csv
 import datetime
+import logging
 import pprint
 import re
 import string
+
+import common_utils
+
 
 class DeltaTemplate(string.Template):
     delimiter = "%"
@@ -27,20 +31,20 @@ def timedelta_format(tdelta, fmt):
 
 def display_durations(log_entries):
     csv_file_path = "/home/fergusos/reports/check_log_durations_{:%Y%m%d_%H%M%S}.csv".format(datetime.datetime.now())
-    print()
+    logging.info()
     with open(csv_file_path, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=["pattern_key", "start", "finish", "duration"], extrasaction="ignore")
         writer.writeheader()
         for dur_key in log_entries.keys():
-            print("\nDurations for {0}\n".format(dur_key))
-            print("{:<26}   {}".format("Start time", "Duration"))
+            logging.info("\nDurations for {0}\n".format(dur_key))
+            logging.info("{:<26}   {}".format("Start time", "Duration"))
             for entry in log_entries[dur_key]:
                 writer.writerow(entry)
                 if entry.get("finish"):
-                    print("{:%Y-%m-%d %H:%M:%S.%f}   {}".format(entry["start"], entry["duration"]))
+                    logging.info("{:%Y-%m-%d %H:%M:%S.%f}   {}".format(entry["start"], entry["duration"]))
                 else:
-                    print("{:%Y-%m-%d %H:%M:%S.%f}   No apparent finish time!".format(entry["start"]))
-    print("\nWrote to csv file {}".format(csv_file_path))
+                    logging.info("{:%Y-%m-%d %H:%M:%S.%f}   No apparent finish time!".format(entry["start"]))
+    logging.info("\nWrote to csv file {}".format(csv_file_path))
     
 
 def is_pattern_in_line(patterns, line):
@@ -85,16 +89,29 @@ def get_log_entries(patterns, file_path):
                 log_entries[key] = []
             log_entries[key].append({"pattern_key": key, "start": val, "finish": None, "duration": None})
     return log_entries
-    
-def main():
-    log_file_path = "/cygdrive/c/Users/fergusos/Downloads/app.log.3"
+
+
+def main(log_file_path):
     patterns = {
-        "getAuthorizedApplicationByAppNumber": {"start": "PL/SQL -- execute before succeeds!", "finish": "PL/SQL -- execute succeeds!"},
+        "getAuthorizedApplicationByAppNumber": {"start": "PL/SQL -- execute getAuthorizedApplicationByAppNumber before succeeds!", "finish": "PL/SQL -- execute getAuthorizedApplicationByAppNumber succeeds!"},
         # "": {"start": "", "finish": ""},
         }
     log_entries = get_log_entries(patterns, log_file_path)
-    # pprint.pprint(log_entries)
     display_durations(log_entries)
+
     
 if __name__ == "__main__":
-    main()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-v", "--verbose", dest="verbose", action="store_true", help="Flag to print verbose log messages.")
+    parser.add_argument(dest='log_file_path', help='Log file to check durations from.')
+    args = parser.parse_args()
+
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    
+    output_file_path = common_utils.get_log_file_path("/home/fergusos/reports", "check_log_durations")
+    common_utils.setup_logger_to_console_file(output_file_path, log_level)
+
+    main(args.log_file_path)
+
+    logging.info('\n\nLog file: {}'.format(output_file_path))

@@ -1,31 +1,20 @@
 import argparse
 import datetime
+import logging
 import sys
 import urllib.parse
 
 from lxml import etree
 import requests
 
+import common_utils
+import environment
 
-applications_info = {"app1": "app1/path/login.htm",
-                     "app2": "app2/path/login.htm",
-                     "app3": "app3/path/login.htm",
-                     "app4": "app4/path/login.htm",
-                    }
-
-
-environments_info = {"localhost": "localhost:9443",
-                     "DEV": "dev.host.com",
-                     "INT": "int.host.com",
-                     "QA": "qa.host.com",
-                     "UAT": "uat.host.com",
-                     "TRAINING": "",
-                     "PROD": "www.host.com",
-                    }
 
 def build_app_url(env, app_name):
-    return "https://{0}/{1}".format(environments_info[env], applications_info[app_name])
+    return "https://{0}/{1}".format(environment.ENVIRONMENTS_HOST[env], environment.APPLICATIONS_URL_PATHS[app_name])
 
+    
 def get_app_version_from_page_source(url, page_src):
     tree = etree.HTML(page_src)
     x = tree.xpath('//*[@id="wb-dtmd"]/dd')
@@ -39,42 +28,47 @@ def get_app_version_from_page_source(url, page_src):
 def get_deployed_app_version(env, app_name, verbose=None):
     url = build_app_url(env, app_name)
     try:
-        r = requests.get(url)
+        verify_ssl = env != "localhost" 
+        r = requests.get(url, verify=verify_ssl)
         if r.status_code == requests.codes.ok:
             return get_app_version_from_page_source(url, r.text)
         else:
             return "page unavailable: {}".format(r.status_code), "N/A"
     except:
         e = sys.exc_info()
-        print('\nEXCEPTION trying to get url {}! {} \n{} \n{}\n'.format(url, e[0], e[1], e[2]))
+        logging.warn('\nEXCEPTION trying to get url {}! {} \n{} \n{}\n'.format(url, e[0], e[1], e[2]))
         return "url unavailable", "N/A"
     
 def main(env_param=None, applications=None, verbose=None):
     if applications is None:
-        applications = applications_info
+        applications = environment.APPLICATIONS_URL_PATHS.keys()
     if verbose is None:
         verbose = False
 
     if env_param is None:
-        envs = environments_info.keys()
-    elif env_param in environments_info.keys():
+        envs = environment.ENVIRONMENTS_HOST.keys()
+    elif env_param in environment.ENVIRONMENTS_HOST.keys():
         envs = [env_param]
     else:
-        print("Cannot find env '{0}'.".format(env))
+        logging.warn("Cannot find env '{0}'.".format(env))
         return
         
     for env in envs:
-        print("\n{} Environment at {}".format(env, datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        logging.info("\n{} Environment at {}".format(env, datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         for app in applications:
             version, timestamp = get_deployed_app_version(env, app, verbose)
-            print("{0:<20}  {1:<18}  {2}".format(app, version, timestamp))
+            logging.info("{0:<20}  {1:<18}  {2}".format(app, version, timestamp))
 
 if __name__ == "__main__": 
     parser = argparse.ArgumentParser()
-    parser.add_argument("env")
-    parser.add_argument("apps", nargs="*")
+    parser.add_argument("env", choices=environment.ENVIRONMENTS_HOST.keys())
+    parser.add_argument("apps", nargs="*", help="Should be None or one or more of {0}".format(environment.APPLICATIONS_URL_PATHS.keys()))
     parser.add_argument("-v", dest="verbose", action="store_true")
     
     args = parser.parse_args()
+    log_level = logging.DEBUG if args.verbose else logging.INFO
 
-    main(args.env, applications_info if len(args.apps) == 0 else args.apps, args.verbose)
+    log_file_path = common_utils.get_log_file_path("~/reports", "check_deployed_versions")
+    common_utils.setup_logger_to_console_file(log_file_path, log_level)
+
+    main(args.env, environment.APPLICATIONS_URL_PATHS.keys() if len(args.apps) == 0 else args.apps, args.verbose)

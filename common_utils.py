@@ -5,6 +5,17 @@ import os
 import os.path
 
 
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+
 def setup_logger_to_console_file(log_file_path, log_level=None):
     if not log_level:
         log_level = logging.INFO

@@ -4,8 +4,10 @@ import itertools
 import logging
 import os.path
 import pathlib
+import pprint
 import re
 import sys
+import xml.etree.ElementTree as ET
 
 import git
 import requests
@@ -13,66 +15,21 @@ from bs4 import BeautifulSoup
 
 import common_utils
 import environment
+import maven_utils
 
 
 def get_git_info(path):
+    if not path:
+        return {"repo_url": "Not git repo",
+                "branch": "Not git repo"}
     try:
         repo = git.Repo(path, search_parent_directories=True)
         return {"repo_url": repo.remotes.origin.url,
                 "branch": repo.active_branch.name}
-    except:        
-        logging.warn("**** path {0} was found to not be a git repo. ********".format(path))
+    except:
+        logging.warning("**** path {0} was found to not be a git repo. ********".format(path))
         return {"repo_url": "Not git repo",
                 "branch": "Not git repo"}
-
-
-def parse_artifact_list_page(page_source, group_id, artifact_id):                
-    artifact_list_dict = {}
-    soup = BeautifulSoup(page_source)
-    rows = soup.find_all("tr")
-    for row in rows:
-        cols = row.find_all("td")
-        if len(cols) == 4:
-            anch = cols[0].find("a")
-            if anch and cols[2].text.strip() == "":
-                version = anch.text
-                url = anch.attrs["href"]
-                timestamp_str = cols[1].text
-                # Convert timestamp string to DateTime - example: 'Mon Apr 06 10:30:10 EDT 2020'
-                timestamp = datetime.datetime.strptime(timestamp_str, "%a %b %d %H:%M:%S %Z %Y")
-                key = get_pom_key(group_id=group_id, artifact_id=artifact_id, version=version)
-                artifact_list_dict[key] = {"url": url,
-                                        "version": version,
-                                        "groupId": group_id,
-                                        "artifactId": artifact_id,
-                                        "timestamp": timestamp}    
-    return artifact_list_dict
-
-
-def parse_artifact_version_page(page_source, group_id, artifact_id):                
-    artifact_list_dict = {}
-    soup = BeautifulSoup(page_source)
-    rows = soup.find_all("tr")
-    for row in rows:
-        cols = row.find_all("td")
-        if len(cols) == 4:
-            anch = cols[0].find("a")
-            if anch:
-                file_name = anch.text
-                extension = file_name[-4:].lowercase()
-                if extension == ".ear" or extension == ".jar":
-                    url = anch.attrs["href"]
-                    timestamp_str = cols[1].text
-                    # Convert timestamp string to DateTime - example: 'Mon Apr 06 10:30:10 EDT 2020'
-                    timestamp = datetime.datetime.strptime(timestamp_str, "%a %b %d %H:%M:%S %Z %Y")
-                    key = get_pom_key(group_id=group_id, artifact_id=artifact_id, version=version)
-                    artifact_list_dict[key] = {"url": url,
-                                            "version": version,
-                                            "groupId": group_id,
-                                            "artifactId": artifact_id,
-                                            "filename": file_name,
-                                            "timestamp": timestamp}    
-    return artifact_list_dict
 
 
 def find_available_versions_of_artifact(group_id, artifact_id):
@@ -88,419 +45,554 @@ def find_available_versions_of_artifact(group_id, artifact_id):
         try:
             artifact_list_page = requests.get(artifact_url, headers=headers)
         except Exception as ex:
-            logging.warn("Could not get artifact_url {0} for group_id {} and artifact_id {}. Exception {1}".format(artifact_url, group_id, artifact_id, ex.getMessage()))
+            logging.warning(
+                "Could not get artifact_url {} for group_id {} and artifact_id {}. Exception {}".format(artifact_url,
+                                                                                                        group_id,
+                                                                                                        artifact_id,
+                                                                                                        ex.getMessage()))
             continue
         if artifact_list_page.status_code != requests.codes.ok:
-            logging.warn("Could not get artifact_url {0} for group_id {} and artifact_id {}. status_code {1}".format(artifact_url, group_id, artifact_id, artifact_list_page.status_code))
-            continue   
-        artifact_list_dict = parse_artifact_list_page(artifact_list_page.text, group_id, artifact_id)
+            logging.warning(
+                "Could not get artifact_url {} for group_id {} and artifact_id {}. status_code {}".format(artifact_url,
+                                                                                                          group_id,
+                                                                                                          artifact_id,
+                                                                                                          artifact_list_page.status_code))
+            continue
+        logging.debug("Got artifact list page from url: {}".format(artifact_url))
+        artifact_list_dict = maven_utils.parse_artifact_list_page(artifact_list_page.text, group_id, artifact_id)
+        logging.debug("Got {} version pages to parse for {} versions".format(len(artifact_list_dict), url_desc))
         for artifact_item in sorted(artifact_list_dict.values(), key=lambda k: k["timestamp"], reverse=True):
-            try:
-                artifact_version_page = requests.get(artifact_item["url"], headers=headers)
-            except Exception as ex:
-                logging.warn("Could not get artifact_version url {0} for group_id {} and artifact_id {}. Exception {1}".format(artifact_item["url"], group_id, artifact_id, ex.getMessage()))
-                continue
-            if artifact_version_page.status_code != requests.codes.ok:
-                logging.warn("Could not get artifact_version url {0} for group_id {} and artifact_id {}. status_code {1}".format(artifact_item["url"], group_id, artifact_id, artifact_version_page.status_code))
-                continue   
-            artifact_versions_dict = parse_artifact_version_page(artifact_version_page.text, group_id, artifact_id)
-                
-            available_versions.update(artifact_versions_dict)
-    return artifact_versions_dict
+            artifact_versions_dict = maven_utils.get_artifact_version_from_version_page(artifact_item["url"], group_id,
+                                                                                        artifact_id,
+                                                                                        artifact_item["version"],
+                                                                                        headers)
+            if artifact_versions_dict:
+                logging.debug(
+                    "For {} {}, Got artifact version page from url: {}, with dict {}".format(group_id, artifact_id,
+                                                                                             artifact_item["url"],
+                                                                                             artifact_versions_dict))
+
+                available_versions[url_desc].update(artifact_versions_dict)
+    logging.debug("Found {0} snapshot versions and {1} released versions in the pages for {1} {2}".format(
+        len(available_versions.get("snapshots_root_url", [])), len(available_versions.get("released_root_url", [])),
+        group_id, artifact_id))
+    return available_versions
 
 
-def load_pom_file(pom_path):
-    logging.debug("Attempting to load {}\n".format(pom_path))
-    pom_info = {"path": pom_path}
-    pom_tree = ET.parse(pom_path)
-    root = pom_tree.getroot()
-    nsmap = {"m": "http://maven.apache.org/POM/4.0.0"}
-
-    _el = root.find("m:groupId", nsmap)   
-    pom_info["groupId"] = "unspecified" if _el is None else _el.text
-    _el = root.find("m:artifactId", nsmap)   
-    pom_info["artifactId"] = "unspecified" if _el is None else _el.text
-    if '${' in pom_info["artifactId"]:
-        pattern = re.compile(r'\$\{([^}]*)\}')
-        grps = pattern.match( pom_info["artifactId"] );
-        if grps:
-            if grps.group(1) == 'project.artifactId': 
-                pass
-    _el = root.find("m:version", nsmap)   
-    pom_info["version"] = "unspecified" if _el is None else _el.text
-    _el = root.find("m:name", nsmap)   
-    pom_info["name"] = pom_info["artifactId"] if _el is None else _el.text
-    _el = root.find("m:packaging", nsmap)   
-    pom_info["packaging"] = "unspecified" if _el is None else _el.text
-    _el = root.find("m:parent/m:groupId", nsmap)   
-    group_id = "unknown" if _el is None else _el.text
-    _el = root.find("m:parent/m:artifactId", nsmap)   
-    artId = "unknown" if _el is None else _el.text
-    _el = root.find("m:parent/m:version", nsmap)   
-    version = "unknown" if _el is None else _el.text
-    pom_info["parent"] = {"groupId": group_id, "artifactId": artId, "version": version}
-
-    # Property variables
-    properties_els = root.findall("m:properties/*", nsmap)
-    pom_info["properties"] = {}
-    for prop_el in properties_els:
-        pom_info["properties"][prop_el.tag[len(nsmap["m"])+2:]] = prop_el.text
-    
-    # Dependencies
-    pom_info["dependencies"] = {}
-    dependencies_el_list = []
-    dependencies_el_list.extend(root.findall("*/m:dependencies/m:dependency", nsmap))
-    dependencies_el_list.extend(root.findall("m:dependencies/m:dependency", nsmap))
-    variable_pattern = re.compile(r'\$\{([^}]*)\}')
-    for dep_el in dependencies_el_list:
-        _el = dep_el.find("m:version", nsmap)   
-        version = "unspecified" if _el is None else _el.text
-        grps = variable_pattern.match( version )
-        if grps:
-            prop_name = grps.group(1)
-            _el = root.find("m:properties/m:{}".format(prop_name), nsmap)   
-            version = version if _el is None else _el.text
-        group_id = dep_el.find("m:groupId", nsmap).text
-        artId = dep_el.find("m:artifactId", nsmap).text
-        pom_info["dependencies"]["{}/{}".format(group_id, artId)] = { "groupId": group_id, 
-                                                                    "version": version, 
-                                                                    "artifactId": artId}
-    # Modules (sub-projects)
-    pom_info["modules"] = {}
-    modules_el = root.findall("*/m:modules/m:module", nsmap)
-    if not modules_el:
-        modules_el = root.findall("m:modules/m:module", nsmap)
-    for mod_el in modules_el:
-        pom_info["modules"][mod_el.text] = None
-
-    logging.debug("Finished loading {} which contains groupId {}, artifactId {}, and version {}, with {} modules, and {} dependencies, and {} variables\n".format(pom_path, pom_info["groupId"], pom_info["artifactId"], pom_info["version"], len(pom_info["modules"]), len(pom_info["dependencies"]), len(pom_info["properties"])))
-    return pom_info
-
-
-def validate_pom_dependencies(pom_info):
-    is_snapshot = "SNAPSHOT" in pom_info["version"].upper()
-    version_desc = "snapshot" if is_snapshot else pom_info["version"] if pom_info["version"] in ["unknown", "unspecified"] else "release"
-    logging.info("POM {}, {}, is a {} version: {}".format(pom_info["name"], pom_info["path"], version_desc, pom_info["version"]))
-    snapshot_deps = [v for v in pom_info["dependencies"].values() if "SNAPSHOT" in v["version"].upper()]
-    if len(snapshot_deps) > 0:
-        if not is_snapshot:
-            logging.warn("WARNING: a released version, {}, contains {} SNAPSHOT dependencies!".format(pom_info["version"], len(snapshot_deps)))
-        logging.info("The following {} dependencies are SNAPSHOT versions:".format(len(snapshot_deps)))
-        for dep_info in snapshot_deps:
-            logging.info("    {}/{} version: {}".format(dep_info["groupId"], dep_info["artifactId"],  dep_info["version"]))
-
-        
-def get_pom_key(pom_info=None, group_id=None, artifact_id=None, version=None):
-    if not pom_info:
-        pom_info = {"groupId": group_id, "artifactId": artifact_id, "version":version}
-        
-    return "groupId:{groupId};artifactId:{artifactId};version:{version};".format(**pom_info)
-
-    
-def generate_pom_partial_key(group_id=None, artifact_id=None, version=None):
-    desired_key = "groupId:{0};".format(group_id) if group_id and group_id != "unspecified" else ""
-    desired_key = "{0}artifactId:{1};".format(desired_key, artifact_id) if artifact_id else desired_key
-    desired_key = "{0}version:{1};".format(desired_key, version) if version and version != "unspecified" else desired_key
-    return desired_key
-
-
-def find_pom_info(poms_info, group_id=None, artifact_id=None, version=None):
-    desired_key = generate_pom_partial_key(group_id, artifact_id, version)
-    
-    return [pom_info for (k, pom_info) in poms_info.items() if desired_key in k]
-
-
-def resolve_pom_variables(poms_info):
-    logging.debug("Starting resolve_pom_variables(poms_info)\n")
-    # Need to go through all poms to see if there are any pom variable substituions that need to be performed
-    variable_pattern = re.compile(r'\$\{([^}]*)\}')
-    for (pom_key, pom_info) in poms_info.items():
-        parent_info = pom_info.get("parent")
-        if parent_info:
-            parent_pom_infos = find_pom_info(poms_info, group_id=parent_info["groupId"], artifact_id=parent_info["artifactId"], version=parent_info["version"]) 
-            parent_pom_info = None
-            if len(parent_pom_infos) > 1:
-                logging.warn("Found multiple parent poms with groupId {}, artifactId {} and version {} for pom groupId {}, artifactId {} and version {}. Using the first one ".format(parent_info["groupId"], parent_info["artifactId"], parent_info["version"], pom_info["groupId"], pom_info["artifactId"], pom_info["version"]))
-                parent_pom_info = parent_pom_infos[0]
-            elif len(parent_pom_infos) == 1:
-                parent_pom_info = parent_pom_infos[0]
-            else:
-                logging.warn("Could not find parent pom with groupId {}, artifactId {} and version {} for pom groupId {}, artifactId {} and version {} ".format(parent_info["groupId"], parent_info["artifactId"], parent_info["version"], pom_info["groupId"], pom_info["artifactId"], pom_info["version"]))
-            
-        if pom_info["groupId"] == "unspecified" and parent_pom_info:
-            logging.debug("Setting groupId to {} from the parent pom for the pom with groupId {}, artifactId {} and version {}".format(parent_pom_info["groupId"], pom_info["groupId"], pom_info["artifactId"], pom_info["version"]))
-            pom_info["groupId"] = parent_pom_info["groupId"]
-        if pom_info["version"] == "unspecified" and parent_pom_info:
-            logging.debug("Setting version to {} from the parent pom for the pom with groupId {}, artifactId {} and version {}".format(parent_pom_info["version"], pom_info["groupId"], pom_info["artifactId"], pom_info["version"]))
-            pom_info["version"] = parent_pom_info["version"]
-        elif pom_info["version"].startswith("${"):
-            grps = variable_pattern.match( pom_info["version"] );
-            if grps:
-                prop_name = grps.group(1)
-                v = parent_pom_info["properties"].get(prop_name)
-                if v:
-                    logging.debug("Setting version to '{}' for the pom with groupId {}, artifactId {} and version {}".format(v, pom_info["groupId"], pom_info["artifactId"], pom_info["version"]))
-                    pom_info["version"] = v
-                else:
-                    logging.debug("Could not get property {} for the version for the pom with groupId {}, artifactId {} and version {}".format(prop_name, pom_info["groupId"], pom_info["artifactId"], pom_info["version"]))
-            else:
-                logging.debug("Could not parse out a property name from {} for the version for the pom with groupId {}, artifactId {} and version {}".format(pom_info["version"], pom_info["groupId"], pom_info["artifactId"], pom_info["version"]))
-        new_key = get_pom_key(pom_info)
-        if new_key != pom_key:
-            logging.debug("Changing the key from '{}' to '{}' for the pom with groupId {}, artifactId {} and version {}".format(pom_key, new_key, pom_info["groupId"], pom_info["artifactId"], pom_info["version"]))
-            del poms_info[pom_key]
-            poms_info[new_key] = pom_info
-        if pom_info["name"].find("${") >= 0:
-            for m in re.finditer(variable_pattern, pom_info["name"]):
-                prop_name = m.group(1)
-                if prop_name.startswith("project."):
-                    v = pom_info.get(prop_name[8:])
-                else:
-                    v = parent_pom_info["properties"].get(prop_name)
-                if v:
-                    logging.debug("Setting name to '{}' for the pom with groupId {}, artifactId {} and version {}".format(v, pom_info["groupId"], pom_info["artifactId"], pom_info["version"]))
-                    pom_info["name"] = pom_info["name"].replace("${{{}}}".format(prop_name), v)
-                else:
-                    logging.debug("Could not get property {} for the name for the pom with groupId {}, artifactId {} and version {}".format(prop_name, pom_info["groupId"], pom_info["artifactId"], pom_info["version"]))
-            else:
-                logging.debug("Could not parse out a property name from {} for the name for the pom with groupId {}, artifactId {} and version {}".format(pom_info["name"], pom_info["groupId"], pom_info["artifactId"], pom_info["version"]))
-        dependencies = pom_info.get("dependencies")
-        if dependencies:
-            for (dep_key, dep) in dependencies.items():               
-                for k in ["groupId", "artifactId", "version"]:
-                    val = dep[k] 
-                    if val.startswith("${"):
-                        grps = variable_pattern.match(val);
-                        if grps:
-                            prop_name = grps.group(1)
-                            if prop_name.startswith("project."):
-                                v = pom_info[k]
-                            else:
-                                v = parent_pom_info["properties"].get(prop_name)
-                            if v:
-                                logging.debug("Setting {} to '{}' for the dependency with groupId {}, artifactId {} and version {}".format(k, v, dep["groupId"], dep["artifactId"], dep["version"]))
-                                dep[k] = v
-                            else:
-                                logging.debug("Could not get property {} for the {} for the dependency with groupId {}, artifactId {} and version {}".format(prop_name, k, dep["groupId"], dep["artifactId"], dep["version"]))
-                        else:
-                            logging.debug("Could not parse out a property name from {} for the {} for the dependency with groupId {}, artifactId {} and version {}".format(dep["version"], k, dep["groupId"], dep["artifactId"], dep["version"]))
-                new_key = "{}/{}".format(dep["groupId"], dep["artifactId"])
-                if new_key != dep_key:
-                    logging.debug("Changing the dependency key from '{}' to '{}' for the dependecy with groupId {}, artifactId {} and version {}".format(dep_key, new_key, dep["groupId"], dep["artifactId"], dep["version"]))
-                    del dependencies[dep_key]
-                    dependencies[new_key] = dep
-        if pom_info.get("modules"):
-            modules = pom_info.get("modules")
-            logging.debug("There are {} modules for pom groupId {}, artifactId {} and version {} ".format(len(modules), pom_info["groupId"], pom_info["artifactId"], pom_info["version"]))
-            for mod in modules.keys():
-                if modules[mod] is None:
-                    mod_pom_infos = find_pom_info(poms_info, group_id=pom_info["groupId"], artifact_id=mod, version=pom_info["version"]) 
-                    mod_pom_info = None
-                    if len(mod_pom_infos) > 1:
-                        logging.warn("Found multiple module poms with groupId {}, artifactId {} and version {} for pom groupId {}, artifactId {} and version {}. Using the first one ".format(pom_info["groupId"], mod, pom_info["version"], pom_info["groupId"], pom_info["artifactId"], pom_info["version"]))
-                        modules[mod] = mod_pom_infos[0]
-                    elif len(mod_pom_infos) == 1:
-                        modules[mod] = mod_pom_infos[0]
-                    else:
-                        logging.warn("Could not find module pom with groupId {}, artifactId {} and version {} for pom groupId {}, artifactId {} and version {} ".format(pom_info["groupId"], mod, pom_info["version"], pom_info["groupId"], pom_info["artifactId"], pom_info["version"]))
-            else:    
-                logging.debug("No modules for the pom pom groupId {}, artifactId {} and version {} ".format(pom_info["groupId"], pom_info["artifactId"], pom_info["version"]))
-    logging.debug("Finsihed resolve_pom_variables(poms_info)\n")
-    return poms_info
-
-
-def load_pom_files_from_workspace(root_path):
-    logging.debug("Start of load_pom_files_from_workspace('{}')\n".format(root_path))
-    poms_info = {}
-    pom_files = sorted(itertools.chain(root_path.glob("pom.xml"), root_path.glob("*/pom.xml"), root_path.glob("*/*/pom.xml")))
-    variable_pattern = re.compile(r'\$\{([^}]*)\}')
-    for pom_path in pom_files:
-        pom_info = load_pom_file(pom_path)
-        pom_key = get_pom_key(pom_info)
-        if pom_key not in poms_info:
-            validate_pom_dependencies(pom_info)
-            poms_info[pom_key] = pom_info            
-            logging.debug('Loaded pom with the key "{0}" from {1}'.format(pom_key, pom_info["path"]))
+def get_latest_version_key(pom_info, is_snapshot):
+    if not pom_info.available_versions:
+        pom_info.available_versions = find_available_versions_of_artifact(pom_info.group_id, pom_info.artifact_id)
+    if pom_info.available_versions:
+        versions = pom_info.available_versions.get(
+            "snapshots_root_url") if is_snapshot else pom_info.available_versions.get("released_root_url")
+        if versions:
+            return max(versions, key=lambda v: versions[v]["timestamp"])
         else:
-            logging.warn('There is already a pom with the key "{0}". Not adding the one for {1}'.format(pom_key, pom_info["path"]))
-    
-    resolve_pom_variables(poms_info)
-    resolve_pom_variables(poms_info)
-    
-    logging.debug("Finished load_pom_files_from_workspace('{}')\n".format(root_path))
-    return poms_info
+            logging.debug(
+                "There are no available {1} versions for the pom with {0.group_id} {0.artifact_id} and version {0.version}".format(
+                    pom_info, "snapshot" if is_snapshot else "release"))
+            return None
+    else:
+        logging.debug(
+            "Could not get available_versions for the pom with {0.group_id} {0.artifact_id} and version {0.version}".format(
+                pom_info))
+        return None
+
+
+def test_find_available_versions_of_artifact():
+    log_file_path = common_utils.get_log_file_path("~/reports", "testing_find_available_versions_of_artifact")
+    common_utils.setup_logger_to_console_file(log_file_path, log_level)
+    group_id = "ca.gc.ic.cipo.ec.id"
+    artifact_id = "CIPO-ec-id-core"
+    artifact_versions_dict = find_available_versions_of_artifact(group_id, artifact_id)
+    pprint.pprint(artifact_versions_dict)
+
+    print("==============================")
+    print(max(set(artifact_versions_dict["snapshots_root_url"].keys())))
+    print("==============================")
+    pprint.pprint(artifact_versions_dict["snapshots_root_url"].keys())
+    print("==============================")
+    pprint.pprint(
+        artifact_versions_dict["snapshots_root_url"][max(set(artifact_versions_dict["snapshots_root_url"].keys()))])
 
 
 def document_workspace(root_path):
     root_path = pathlib.Path(root_path)
-    
-    poms_info = load_pom_files_from_workspace(root_path)
+
+    poms_info = maven_utils.load_pom_files_from_workspace(root_path, True)
 
     logging.info("Displaying the pom dependencies of all the projects in workspace {}\n".format(root_path))
 
     logging.info('Display of pom dependencies:')
-    for v in poms_info.values():
-        logging.info('GroupId: {groupId}'.format(**v))
-        logging.info('ArtifactId: {artifactId}'.format(**v))
-        logging.info('Version: {version}'.format(**v))
-        logging.info('Path: {path}'.format(**v))
-        logging.info('Name: {name}'.format(**v))
-        logging.info('Dependencies:')
-        for dep_info in v['dependencies'].values():
-            pom_key = "groupId:{groupId};artifactId:{artifactId};version:{version}".format(**dep_info)
-            logging.info(' -- GroupId: {}'.format(dep_info['groupId']))
-            logging.info('    ArtifactId: {}'.format(dep_info['artifactId']))
-            logging.info('    Version: {}'.format(dep_info['version']))
-            if pom_key in poms_info:
-                logging.info('    LOCAL ENVIRONMENT COPY')
+    for key in sorted(poms_info.keys()):
+        v = poms_info[key]
+        if not v.path:
+            continue
+        logging.info('GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}}'.format(v))
+        logging.info('Path: {0.path}'.format(v))
+        logging.info('Name: {0.name}'.format(v))
+        repo_info = get_git_info(v.path)
+        logging.info("Git repo: {repo_url}".format(**repo_info))
+        logging.info("Git branch: {branch}".format(**repo_info))
+
+        if v.modules:
+            logging.info('Modules:')
+            for mod_key in sorted(v.modules.keys()):
+                mod_info = v.modules[mod_key]
+                if mod_info:
+                    pom_key = "groupId:{0.group_id};artifactId:{0.artifact_id};version:{0.version}}".format(mod_info)
+                    logging.info(
+                        ' -- GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}}'.format(
+                            mod_info))
+                    if pom_key in poms_info and poms_info[pom_key].path:
+                        logging.info('    LOCAL ENVIRONMENT COPY')
+                else:
+                    logging.warning(
+                        "Empty Modules mod_info for key '{}' for pom groupId: {} artifactId: {} version: {}".format(
+                            mod_key, v.group_id, v.artifact_id, v.version))
+        if v['dependenciesManagement']:
+            logging.info('Managed Dependencies:')
+            for dep_key in sorted(v['dependenciesManagement'].keys()):
+                dep_info = v['dependenciesManagement'][dep_key]
+                pom_key = "groupId:{0.group_id};artifactId:{0.artifact_id};version:{0.version}}".format(dep_info)
+                logging.info(
+                    ' -- GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}}'.format(
+                        dep_info))
+                if pom_key in poms_info and poms_info[pom_key].path:
+                    logging.info('    LOCAL ENVIRONMENT COPY')
+        if v.dependencies:
+            logging.info('Dependencies:')
+            for dep_key in sorted(v.dependencies.keys()):
+                dep_info = v.dependencies[dep_key]
+                pom_key = "groupId:{0.group_id};artifactId:{0.artifact_id};version:{0.version}".format(dep_info)
+                logging.info(
+                    ' -- GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}'.format(
+                        dep_info))
+                if pom_key in poms_info and poms_info[pom_key].path:
+                    logging.info('    LOCAL ENVIRONMENT COPY')
+        logging.info(" ")
 
 
-def check_dependencies(poms_info, dependency_poms_infos):
+def display_dependencies(poms_info, dependency_poms_infos):
     deps_to_check = []
     for dep_info in dependency_poms_infos:
-        dep_pom_info_list = find_pom_info(poms_info, group_id=dep_info["groupId"], artifact_id=dep_info["artifactId"])
+        dep_pom_info_list = maven_utils.find_pom_info(poms_info, group_id=dep_info.group_id,
+                                                      artifact_id=dep_info.artifact_id)
         if not dep_pom_info_list:
-            logging.info("Dependency not present:                GroupId: {groupId:<35}  ArtifactId: {artifactId:<40}  Version: {version}".format(**dep_info))
+            logging.info(
+                "Dependency not present:                GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}}".format(
+                    dep_info))
         elif len(dep_pom_info_list) > 1:
-            logging.info("Multiple copied of Dependency present: GroupId: {groupId:<35}  ArtifactId: {artifactId:<40}  Version: {version}".format(**dep_info))
+            logging.info(
+                "Multiple copies of Dependency present: GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}}".format(
+                    dep_info))
             for pom_info in dep_pom_info_list:
-                logging.info('\tGroupId: {groupId:<35}  ArtifactId: {artifactId:<40}  Version: {version}'.format(**pom_info))
-                logging.info('\t\tPath: {path}'.format(**pom_info))
-                logging.info('\t\tName: {name}'.format(**pom_info))
-        elif dep_info["version"] == dep_pom_info_list[0]["version"]:
-            logging.info("Proper dependency version present:     GroupId: {groupId:<35}  ArtifactId: {artifactId:<40}  Version: {version}".format(**(dep_pom_info_list[0])))
-            logging.info("\t\tPath: {path}".format(**(dep_pom_info_list[0])))
-            logging.info("\t\tName: {name}".format(**(dep_pom_info_list[0])))
-            repo_info = get_git_info(dep_pom_info_list[0]["path"])
-            logging.info("\t\tGit repo: {repo_url}".format(**repo_info))
-            logging.info("\t\tGit branch: {branch}".format(**repo_info))
-            
+                logging.info(
+                    '\tGroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}}'.format(
+                        pom_info))
+                logging.info('\t\tPath: {0.path}'.format(pom_info))
+                logging.info('\t\tName: {0.name}'.format(pom_info))
+        elif dep_info.version == dep_pom_info_list[0].version:
+            logging.info(
+                "Proper dependency version present:     GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}}".format(
+                    dep_pom_info_list[0]))
+            logging.info("\t\tPath: {0.path}".format(dep_pom_info_list[0]))
+            logging.info("\t\tName: {0.name}".format(dep_pom_info_list[0]))
+            if dep_pom_info_list[0].path:
+                repo_info = get_git_info(dep_pom_info_list[0].path)
+                logging.info("\t\tGit repo: {repo_url}".format(**repo_info))
+                logging.info("\t\tGit branch: {branch}".format(**repo_info))
+
             deps_to_check.append(dep_pom_info_list[0])
         else:
-            logging.info("Incorrect dependency version present:  GroupId: {groupId:<35}  ArtifactId: {artifactId:<40}  Version: {version}".format(**(dep_pom_info_list[0])))
-            logging.info("\t\tPath: {path}".format(**(dep_pom_info_list[0])))
-            logging.info("\t\tName: {name}".format(**(dep_pom_info_list[0])))
-            repo_info = get_git_info(dep_pom_info_list[0]["path"])
-            logging.info("\t\tGit repo: {repo_url}".format(**repo_info))
-            logging.info("\t\tGit branch: {branch}".format(**repo_info))
-            logging.info("\tRequired version: {}".format(dep_info["version"]))
+            logging.info(
+                "Incorrect dependency version present:  GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}}".format(
+                    dep_pom_info_list[0]))
+            logging.info("\t\tPath: {0.path}".format(dep_pom_info_list[0]))
+            logging.info("\t\tName: {0.name}".format(dep_pom_info_list[0]))
+            if dep_pom_info_list[0].path:
+                repo_info = get_git_info(dep_pom_info_list[0].path)
+                logging.info("\t\tGit repo: {repo_url}".format(**repo_info))
+                logging.info("\t\tGit branch: {branch}".format(**repo_info))
+            logging.info("\tRequired version: {}".format(dep_info.version))
     for dep_pom_info in deps_to_check:
-        logging.info('Using dependent project GroupId: {groupId:<35}\tArtifactId: {artifactId:<40}\tVersion: {version}'.format(**dep_pom_info))
-        logging.info('\t\tPath: {path}'.format(**dep_pom_info))
-        logging.info('\t\tName: {name}'.format(**dep_pom_info))
-        repo_info = get_git_info(dep_pom_info["path"])
-        logging.info("\t\tGit repo: {repo_url}".format(**repo_info))
-        logging.info("\t\tGit branch: {branch}\n".format(**repo_info))
-        logging.info('Dependencies:')
-        
-        check_dependencies(poms_info, dep_pom_info['dependencies'].values())
-        
-
-def check_modules(poms_info, parent_pom_info):
-    modules_poms_dict = parent_pom_info['modules']
-    for (mod_key, mod_info) in modules_poms_dict.items():
-        if not mod_info:
-            logging.info("Module not present:                GroupId: {:<35}  ArtifactId: {:<40}  Version: {}".format(parent_pom_info["groupId"], mod_key, parent_pom_info["version"]))
-        else:
-            logging.info("Module information:     GroupId: {groupId:<35}  ArtifactId: {artifactId:<40}  Version: {version}".format(**mod_info))
-            logging.info("\t\tPath: {path}".format(**mod_info))
-            logging.info("\t\tName: {name}".format(**mod_info))
-            repo_info = get_git_info(mod_info["path"])
+        logging.info(
+            'Using dependent project GroupId: {0.group_id:<35}\tArtifactId: {0.artifact_id:<50}\tVersion: {0.version}}'.format(
+                dep_pom_info))
+        logging.info('\t\tPath: {0.path}'.format(dep_pom_info))
+        logging.info('\t\tName: {0.name}'.format(dep_pom_info))
+        if dep_pom_info.path:
+            repo_info = get_git_info(dep_pom_info.path)
             logging.info("\t\tGit repo: {repo_url}".format(**repo_info))
-            logging.info("\t\tGit branch: {branch}".format(**repo_info))
-      
-            check_dependencies(poms_info, mod_info['dependencies'].values())
-        
+            logging.info("\t\tGit branch: {branch}\n".format(**repo_info))
+        logging.info('Dependencies:')
+
+        display_dependencies(poms_info, dep_pom_info.dependencies.values())
+
+
+def display_modules(poms_info, parent_pom_info):
+    modules_poms_dict = parent_pom_info.modules
+    if modules_poms_dict:
+        logging.info('Modules:')
+        for mod_key in sorted(modules_poms_dict.keys()):
+            mod_info = modules_poms_dict[mod_key]
+            if not mod_info:
+                logging.info(
+                    "Module not present:                GroupId: {:<35}  ArtifactId: {:<50}  Version: {}".format(
+                        parent_pom_info.group_id, mod_key, parent_pom_info.version))
+            else:
+                logging.info(
+                    "Module information:     GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}}".format(
+                        mod_info))
+                logging.info("\t\tPath: {0.path}".format(mod_info))
+                logging.info("\t\tName: {0.name}".format(mod_info))
+                if mod_info.path:
+                    repo_info = get_git_info(mod_info.path)
+                    logging.info("\t\tGit repo: {repo_url}".format(**repo_info))
+                    logging.info("\t\tGit branch: {branch}".format(**repo_info))
+
+                display_dependencies(poms_info, mod_info.dependencies.values())
+
 
 def check_poms_against_parent(parent_project_name, workspace):
     root_path = pathlib.Path(workspace)
 
-    logging.info("Attempting to check the pom dependencies for {} pom artifact project in workspace {} against other projects in the same workspace\n".format(parent_project_name, workspace))
+    logging.info(
+        "Attempting to check the pom dependencies for {} pom artifact project in workspace {} against other projects in the same workspace\n".format(
+            parent_project_name, workspace))
 
-    poms_info = load_pom_files_from_workspace(root_path)
+    poms_info = maven_utils.load_pom_files_from_workspace(root_path)
     # Find the parent project's pom info
-    parent_pom_info_list = find_pom_info(poms_info, artifact_id=parent_project_name)
+    parent_pom_info_list = maven_utils.find_pom_info(poms_info, artifact_id=parent_project_name)
     if not parent_pom_info_list:
-        logging.info("Could not find parent project with artifactId of '{0}' in the workspace {1}.".format(parent_project_name, workspace))
+        logging.info(
+            "Could not find parent project with artifactId of '{0}' in the workspace {1}.".format(parent_project_name,
+                                                                                                  workspace))
         sys.exit(0)
     if len(parent_pom_info_list) > 1:
-        logging.warn("Found multiple parent projects with artifactId of '{0}' in the workspace {1}.".format(parent_project_name, workspace))
+        logging.warning(
+            "Found multiple parent projects with artifactId of '{0}' in the workspace {1}.".format(parent_project_name,
+                                                                                                   workspace))
         for pom_info in parent_pom_info_list:
-            logging.warn('\tGroupId: {groupId:<35}\tArtifactId: {artifactId:<40}\tVersion: {version}'.format(**pom_info))
-            logging.warn('\t\tPath: {path}'.format(**pom_info))
-            logging.warn('\t\tName: {name}'.format(**pom_info))
-        logging.warn("Cannot perform analysis with multiple parent projects.")
+            logging.warning(
+                '\tGroupId: {0.group_id:<35}\tArtifactId: {0.artifact_id:<50}\tVersion: {0.version}}'.format(pom_info))
+            logging.warning('\t\tPath: {0.path}'.format(pom_info))
+            logging.warning('\t\tName: {0.name}'.format(pom_info))
+        logging.warning("Cannot perform analysis with multiple parent projects.")
         sys.exit(0)
     parent_pom_info = parent_pom_info_list[0]
-    repo_info = get_git_info(parent_pom_info["path"])
-    logging.info('Using Parent project GroupId: {groupId:<35}\tArtifactId: {artifactId:<40}\tVersion: {version}'.format(**parent_pom_info))
-    logging.info('\t\tPath: {path}'.format(**parent_pom_info))
-    logging.info('\t\tName: {name}'.format(**parent_pom_info))
-    logging.info("\t\tGit repo: {repo_url}".format(**repo_info))
-    logging.info("\t\tGit branch: {branch}\n".format(**repo_info))
+    logging.info(
+        'Using Parent project GroupId: {0.group_id:<35}\tArtifactId: {0.artifact_id:<50}\tVersion: {0.version}}'.format(
+            parent_pom_info))
+    logging.info('\t\tPath: {0.path}'.format(parent_pom_info))
+    logging.info('\t\tName: {0.name}'.format(parent_pom_info))
+    if parent_pom_info.path:
+        repo_info = get_git_info(parent_pom_info.path)
+        logging.info("\t\tGit repo: {repo_url}".format(**repo_info))
+        logging.info("\t\tGit branch: {branch}\n".format(**repo_info))
+
+    display_modules(poms_info, parent_pom_info)
+
+    logging.info('Managed Dependencies:')
+    display_dependencies(poms_info, parent_pom_info['dependenciesManagement'].values())
     logging.info('Dependencies:')
-    
-    check_modules(poms_info, parent_pom_info)
-    
-    check_dependencies(poms_info, parent_pom_info['dependencies'].values())
-        
-    
+    display_dependencies(poms_info, parent_pom_info.dependencies.values())
+
+
 def checkout_branch(parent_project_name, workspace, branch, reset):
     root_path = pathlib.Path(workspace)
 
-    logging.info("Attempting to check out Branch {} of the git repository for {} pom artifact in workspace {}, with reset flag {}\n".format(branch, parent_project_name, workspace, reset))
-    
-    poms_info = load_pom_files_from_workspace(root_path)
+    logging.info(
+        "Attempting to check out Branch {} of the git repository for {} pom artifact in workspace {}, with reset flag {}\n".format(
+            branch, parent_project_name, workspace, reset))
+
+    poms_info = maven_utils.load_pom_files_from_workspace(root_path)
     # Find the parent project's pom info
-    parent_pom_info_list = find_pom_info(poms_info, artifact_id=parent_project_name)
+    parent_pom_info_list = maven_utils.find_pom_info(poms_info, artifact_id=parent_project_name)
     if not parent_pom_info_list:
-        logging.info("Could not find parent project with artifactId of '{0}' in the workspace {1}.".format(parent_project_name, workspace))
+        logging.info(
+            "Could not find parent project with artifactId of '{0}' in the workspace {1}.".format(parent_project_name,
+                                                                                                  workspace))
         sys.exit(0)
-    parent_pom_info = parent_pom_info_list[0]            
+    parent_pom_info = parent_pom_info_list[0]
     repo = None
     try:
-        repo = git.Repo(parent_pom_info["path"], search_parent_directories=True)
-    except:        
-        logging.info("**** path {0} was found to not be a git repo. ********".format(parent_pom_info["path"]))
+        repo = git.Repo(parent_pom_info.path, search_parent_directories=True)
+    except:
+        logging.info("**** path {0} was found to not be a git repo. ********".format(parent_pom_info.path))
         repo = None
     # Make sure not already on the desired branch
     if repo.active_branch.name == branch:
-        logging.info("Already on the {} branch  for the project '{}' in the workspace {}.".format(branch, parent_project_name, workspace))
+        logging.info(
+            "Already on the {} branch  for the project '{}' in the workspace {}.".format(branch, parent_project_name,
+                                                                                         workspace))
         return
-        
+
     # Check to see if the branch is validate
     all_branches = [e[2:] for e in repo.git.branch('-a').splitlines()]
     if not (branch in all_branches or "remotes/origin/{}".format(branch) in all_branches):
-        logging.info("{} is not a valid branch in the repo for the parent project with artifactId of '{}' in the workspace {}.".format(branch, parent_project_name, workspace))
+        logging.info(
+            "{} is not a valid branch in the repo for the parent project with artifactId of '{}' in the workspace {}.".format(
+                branch, parent_project_name, workspace))
         sys.exit(0)
-    changes = repo.index.diff(None)    
+    changes = repo.index.diff(None)
     if changes:
         if not reset:
-            logging.info("There are {} changed files that need to be dealt with before switching to the {} branch in the repo for the parent project with artifactId of '{}' in the workspace {}.".format(len(changes), branch, parent_project_name, workspace))
+            logging.info(
+                "There are {} changed files that need to be dealt with before switching to the {} branch in the repo for the parent project with artifactId of '{}' in the workspace {}.".format(
+                    len(changes), branch, parent_project_name, workspace))
             sys.exit(0)
-                
+
         repo.git.checkout(branch, force=True)
     else:
         repo.git.checkout(branch)
-    
+
+
+def display_dependencies_tree(all_poms, pom_info, indent_prefix_str=None, displayed_modules_l=None, local_only=None,
+                              show_max_versions=None):
+    if not indent_prefix_str:
+        indent_prefix_str = ""
+    if not displayed_modules_l:
+        displayed_modules_l = []
+    if pom_info:
+        displayed_modules_l.append(maven_utils.get_pom_key(pom_info))
+        header_indent_prefix = "{}----".format(indent_prefix_str)
+        logging.info("{}+ {:<35}  {:<50}  {}".format(header_indent_prefix, pom_info.group_id, pom_info.artifact_id,
+                                                     pom_info.version))
+        if (local_only and pom_info.path) or not local_only:
+            indent_prefix = "{}    ".format(indent_prefix_str)
+            mod_indent_prefix = "{}    |    |".format(indent_prefix_str)
+            dep_indent_prefix = "{}         |".format(indent_prefix_str)
+            path_or_url = pom_info.path if pom_info.path else pom_info.url
+            logging.info("{}|         {}     {}".format(indent_prefix, pom_info.name, path_or_url))
+            if pom_info.path:
+                repo_info = get_git_info(pom_info.path)
+                logging.info(
+                    "{}|         Git branch: {}   {}".format(indent_prefix, repo_info["branch"], repo_info["repo_url"]))
+            if show_max_versions and pom_info.available_versions:
+                if pom_info.available_versions.get("snapshots_root_url"):
+                    max_snap_version_key = get_latest_version_key(pom_info, is_snapshot=True)
+                    max_snap_version = pom_info.available_versions["snapshots_root_url"][max_snap_version_key][
+                        "version"]
+                    max_snap_timestamp = pom_info.available_versions["snapshots_root_url"][max_snap_version_key][
+                        "timestamp"]
+                else:
+                    max_snap_version_key = None
+                    max_snap_version = None
+                    max_snap_timestamp = None
+                if pom_info.available_versions.get("relesased_root_url"):
+                    max_release_version_key = get_latest_version_key(pom_info, is_snapshot=False)
+                    max_release_version = pom_info.available_versions["relesased_root_url"][max_release_version_key][
+                        "version"]
+                    max_release_timestamp = pom_info.available_versions["relesased_root_url"][max_release_version_key][
+                        "timetamp"]
+                else:
+                    max_release_version_key = None
+                    max_release_version = None
+                    max_release_timestamp = None
+
+                logging.info(
+                    "{}|         Latest snapshot version: {} with timestamp {} and key {}  Latest released version: {} with timestamp {} and key {}".format(
+                        indent_prefix, max_snap_version, max_snap_timestamp, max_snap_version_key, max_release_version,
+                        max_release_timestamp, max_release_version_key))
+            modules_poms_dict = pom_info.modules
+            if modules_poms_dict:
+                logging.info("{}|----+ Modules:".format(indent_prefix))
+                for mod_key in sorted(modules_poms_dict.keys()):
+                    mod_info = modules_poms_dict[mod_key]
+                    if mod_info:
+                        full_key = maven_utils.get_pom_key(mod_info)
+                        if full_key not in displayed_modules_l:
+                            displayed_modules_l.append(full_key)
+                            display_dependencies_tree(all_poms, mod_info, indent_prefix_str=mod_indent_prefix,
+                                                      displayed_modules_l=displayed_modules_l, local_only=local_only,
+                                                      show_max_versions=show_max_versions)
+                        else:
+                            logging.info(
+                                "{}----- {:<35}  {:<50}  {}  ^^".format(mod_indent_prefix, pom_info.group_id, mod_key,
+                                                                        pom_info.version))
+                    else:
+                        logging.info("{}----- {:<35}  {:<50}  {}".format(mod_indent_prefix, pom_info.group_id, mod_key,
+                                                                         pom_info.version))
+            dependency_poms_infos = pom_info.managed_dependencies
+            if dependency_poms_infos:
+                logging.info("{}|----+ Managed Dependencies:".format(indent_prefix))
+                for dep_key in sorted(dependency_poms_infos.keys()):
+                    dep_info = dependency_poms_infos[dep_key]
+                    dep_pom_info_list = maven_utils.find_pom_info(all_poms, group_id=dep_info.group_id,
+                                                                  artifact_id=dep_info.artifact_id,
+                                                                  version=dep_info.version)
+                    if not dep_pom_info_list:
+                        logging.info("{}----- {:<35}  {:<50}  {} ??".format(mod_indent_prefix, dep_info.group_id,
+                                                                            dep_info.artifact_id, dep_info.version))
+                    elif dep_info.version == dep_pom_info_list[0].version:
+                        full_key = maven_utils.get_pom_key(dep_info)
+                        if full_key not in displayed_modules_l:
+                            displayed_modules_l.append(full_key)
+                            display_dependencies_tree(all_poms, dep_pom_info_list[0],
+                                                      indent_prefix_str=mod_indent_prefix,
+                                                      displayed_modules_l=displayed_modules_l, local_only=local_only,
+                                                      show_max_versions=show_max_versions)
+                        else:
+                            logging.info("{}----- {:<35}  {:<50}  {}  ^^".format(mod_indent_prefix, dep_info.group_id,
+                                                                                 dep_info.artifact_id,
+                                                                                 dep_info.version))
+                    elif dep_pom_info_list[0].path:
+                        logging.info("{}----- {:<35}  {:<50}  {:<13} #{} Local version is {}".format(mod_indent_prefix,
+                                                                                                     dep_info.group_id,
+                                                                                                     dep_info.artifact_id,
+                                                                                                     dep_info.version,
+                                                                                                     len(
+                                                                                                         dep_pom_info_list),
+                                                                                                     dep_pom_info_list[
+                                                                                                         0].version))
+                    else:
+                        logging.info("{}----- {:<35}  {:<50}  {} #{}".format(mod_indent_prefix, dep_info.group_id,
+                                                                             dep_info.artifact_id, dep_info.version,
+                                                                             len(dep_pom_info_list)))
+            dependency_poms_infos = pom_info.dependencies
+            if dependency_poms_infos:
+                logging.info("{}-----+ Dependencies:".format(indent_prefix))
+                for dep_key in sorted(dependency_poms_infos.keys()):
+                    dep_info = dependency_poms_infos[dep_key]
+                    dep_pom_info_list = maven_utils.find_pom_info(all_poms, group_id=dep_info.group_id,
+                                                                  artifact_id=dep_info.artifact_id,
+                                                                  version=dep_info.version)
+                    if not dep_pom_info_list:
+                        logging.info("{}----- {:<35}  {:<50}  {}".format(dep_indent_prefix, dep_info.group_id,
+                                                                         dep_info.artifact_id, dep_info.version))
+                    elif dep_info.version == dep_pom_info_list[0].version:
+                        full_key = maven_utils.get_pom_key(dep_info)
+                        if full_key not in displayed_modules_l:
+                            displayed_modules_l.append(full_key)
+                            display_dependencies_tree(all_poms, dep_pom_info_list[0],
+                                                      indent_prefix_str=dep_indent_prefix,
+                                                      displayed_modules_l=displayed_modules_l, local_only=local_only,
+                                                      show_max_versions=show_max_versions)
+                        else:
+                            logging.info("{}----- {:<35}  {:<50}  {}  ^^".format(dep_indent_prefix, dep_info.group_id,
+                                                                                 dep_info.artifact_id,
+                                                                                 dep_info.version))
+                    elif dep_pom_info_list[0].path:
+                        logging.info("{}----- {:<35}  {:<50}  {:<13} #{} Local version is {}".format(dep_indent_prefix,
+                                                                                                     dep_info.group_id,
+                                                                                                     dep_info.artifact_id,
+                                                                                                     dep_info.version,
+                                                                                                     len(
+                                                                                                         dep_pom_info_list),
+                                                                                                     dep_pom_info_list[
+                                                                                                         0].version))
+                    else:
+                        logging.info("{}----- {:<35}  {:<50}  {} #{}".format(dep_indent_prefix, dep_info.group_id,
+                                                                             dep_info.artifact_id, dep_info.version,
+                                                                             len(dep_pom_info_list)))
+
+
+def check_for_latest_dependency_versions(parent_project_name, workspace):
+    root_path = pathlib.Path(workspace)
+
+    logging.info(
+        "Attempting to check the pom dependencies for {} pom artifact project in workspace {} to see if there are more recent versions\n".format(
+            parent_project_name, workspace))
+
+    poms_info = maven_utils.load_pom_files_from_workspace(root_path)
+    # Find the parent project's pom info
+    parent_pom_info_list = maven_utils.find_pom_info(poms_info, artifact_id=parent_project_name)
+    if not parent_pom_info_list:
+        logging.info(
+            "Could not find parent project with artifactId of '{0}' in the workspace {1}.".format(parent_project_name,
+                                                                                                  workspace))
+        sys.exit(0)
+    if len(parent_pom_info_list) > 1:
+        logging.warning(
+            "Found multiple parent projects with artifactId of '{0}' in the workspace {1}.".format(parent_project_name,
+                                                                                                   workspace))
+        for pom_info in parent_pom_info_list:
+            logging.warning(
+                '\tGroupId: {0.group_id:<35}\tArtifactId: {0.artifact_id:<50}\tVersion: {0.version}}'.format(pom_info))
+            logging.warning('\t\tPath: {0.path}'.format(pom_info))
+            logging.warning('\t\tName: {0.name}'.format(pom_info))
+        logging.warning("Cannot perform analysis with multiple parent projects.")
+        sys.exit(0)
+    parent_pom_info = parent_pom_info_list[0]
+    parent_pom_info.available_versions = find_available_versions_of_artifact(parent_pom_info.group_id,
+                                                                             parent_pom_info.artifact_id)
+
+    for pom_info in parent_pom_info.modules.values():
+        if pom_info:
+            pom_info.available_versions = find_available_versions_of_artifact(pom_info.group_id, pom_info.artifact_id)
+
+    for dep_info in parent_pom_info.dependencies.values():
+        if not dep_info.pom_info and dep_info.is_locally_managed():
+            dep_info.pom_info.available_versions = find_available_versions_of_artifact(dep_info.pom_info.group_id,
+                                                                                       dep_info.pom_info.artifact_id)
+
+    # 9:29 AM 2020-05-15    WORKING HERE          
+    display_dependencies_tree(poms_info, parent_pom_info, show_max_versions=True)
+
+
+def load_poms_for_artifact(group_id, artifact_id, version):
+    all_poms = {}
+    pom_info = maven_utils.get_remote_artifact_pom(group_id=group_id, artifact_id=artifact_id, version=version)
+    key = maven_utils.get_pom_key(pom_info)
+    all_poms[key] = pom_info
+
+    all_poms = maven_utils.resolve_missing_items(all_poms)
+
+    maven_utils.resolve_pom_variables(all_poms)
+    maven_utils.resolve_pom_variables(all_poms)
+    return all_poms, pom_info
+
+
+def check_for_conflicting_dependency_versions(group_id, artifact_id, version):
+    if not group_id or not artifact_id or not version:
+        logging.error(
+            "Must have a group_id '{}', artifact_id '{}' and version '{}' to check for conflicting dependency versions.".format(
+                group_id, artifact_id, version))
+        return
+    all_poms, pom_info = load_poms_for_artifact(group_id, artifact_id, version)
+    import pprint
+    pprint.pprint(all_poms)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-d", "--document", dest="document", action="store_true", help="Document the dependencies for all Maven projects in the specified workspace")
-    parser.add_argument("-c", "--check-poms", dest="check_poms", action="store_true", help="Check the pom versions for projects in the workspace against a parent project")
-    parser.add_argument("-k", "--checkout-branch", dest="checkout_branch", action="store_true", help="Checkout the specified branch of the parent project and check the pom version of the rest of the workspace")
-    parser.add_argument("-w", "--workspace", dest="workspace",  help="Workspace path to check. Defaults to '{0}'.".format(environment.WORKSPACE_ROOT_ID), default=environment.WORKSPACE_ROOT_ID)
-    parser.add_argument("-v", "--verbose", dest="verbose", action="store_true", help="Flag to print verbose log messages.")
-    parser.add_argument("-p", "--parent", dest="parent_project", help="The ArtifactId of the Maven project that is the parent (all other projects in the workspace should be the versions specified by the parent project)")
+    action_group = parser.add_mutually_exclusive_group(required=True)
+    action_group.add_argument("-d", "--document", dest="document", action="store_true",
+                              help="Document the dependencies for all Maven projects in the specified workspace")
+    action_group.add_argument("-c", "--check-poms", dest="check_poms", action="store_true",
+                              help="Check the pom versions for projects in the workspace against a parent project")
+    action_group.add_argument("-t", "--check-poms_tree", dest="check_poms_tree", action="store_true",
+                              help="Check the pom versions for projects in the workspace against a parent project. Same as -c but displays in a tree format.")
+    action_group.add_argument("-k", "--checkout-branch", dest="checkout_branch", action="store_true",
+                              help="Checkout the specified branch of the parent project and check the pom version of the rest of the workspace")
+    action_group.add_argument("-n", "--check_poms_newer", dest="check_poms_newer", action="store_true",
+                              help="Check the poms for newer versions of snapsots and/or releases")
+    action_group.add_argument("-x", "--xxx_developing_new_functionality", dest="xx_new_function", action="store_true",
+                              help="testing new functionality")
+    parser.add_argument("-w", "--workspace", dest="workspace",
+                        help="Workspace path to check. Defaults to '{0}'.".format(environment.WORKSPACE_ROOT_ID),
+                        default=environment.WORKSPACE_ROOT_ID)
+    parser.add_argument("-p", "--parent", dest="parent_project",
+                        help="The ArtifactId of the Maven project that is the parent (all other projects in the workspace should be the versions specified by the parent project)")
+    parser.add_argument("-g", "--group_id", dest="group_id",
+                        help="The GroupId of the Maven project that is the parent (all other projects in the workspace should be the versions specified by the parent project)")
+    parser.add_argument("-l", "--local_only", dest="local_only", action="store_true",
+                        help="Flag to only display details of modules present in the workspace. default is to display details of all modules, local and remote.")
+    parser.add_argument("-e", "--version", dest="version", help="The version of the parent project to check.")
     parser.add_argument("-b", "--branch", dest="branch", help="The branch of the parent project to checkout.")
-    parser.add_argument("-r", "--reset", dest="reset", action="store_true", help="Flag to indicate to reset any existing change when checking out.")
-    parser.add_argument("-o", "--open", dest="open_output", action="store_true", help="Flag to indicate to open the log file in an editor once the script has completed.")
+    parser.add_argument("-r", "--reset", dest="reset", action="store_true",
+                        help="Flag to indicate to reset any existing change when checking out.")
+    parser.add_argument("-o", "--open", dest="open_output", action="store_true",
+                        help="Flag to indicate to open the log file in an editor once the script has completed.")
+    parser.add_argument("-v", "--verbose", dest="verbose", action="store_true",
+                        help="Flag to print verbose log messages.")
 
     args = parser.parse_args()
     verbose = args.verbose
     log_level = logging.DEBUG if args.verbose else logging.INFO
     log_file_path = None
-    
+
     if args.document:
         log_file_path = common_utils.get_log_file_path(args.workspace, "document_workspace_dependencies")
         common_utils.setup_logger_to_console_file(log_file_path, log_level)
@@ -513,22 +605,92 @@ if __name__ == "__main__":
         log_file_path = common_utils.get_log_file_path(args.workspace, "check_poms_against_parent")
         common_utils.setup_logger_to_console_file(log_file_path, log_level)
         check_poms_against_parent(args.parent_project, args.workspace)
+    elif args.check_poms_tree:
+        if not args.parent_project:
+            print("To check the pom versions in the workspace, you must supply a parent project.")
+            parser.usage()
+            sys.exit(1)
+        log_file_path = common_utils.get_log_file_path(args.workspace, "check_poms_against_parent_tree")
+        common_utils.setup_logger_to_console_file(log_file_path, log_level)
+        root_path = pathlib.Path(args.workspace)
+        logging.info(
+            "Attempting to check the pom dependencies for {} pom artifact project in workspace {} against other projects in the same workspace\n".format(
+                args.parent_project, args.workspace))
+
+        poms_info = maven_utils.load_pom_files_from_workspace(root_path)
+        # Find the parent project's pom info
+        parent_pom_info_list = maven_utils.find_pom_info(poms_info, artifact_id=args.parent_project)
+        if not parent_pom_info_list:
+            logging.info("Could not find parent project with artifactId of '{0}' in the workspace {1}.".format(
+                args.parent_project, args.workspace))
+            sys.exit(0)
+        if len(parent_pom_info_list) > 1:
+            logging.warning("Found multiple parent projects with artifactId of '{0}' in the workspace {1}.".format(
+                args.parent_project, args.workspace))
+            for pom_info in parent_pom_info_list:
+                logging.warning(
+                    '\tGroupId: {0.group_id:<35}\tArtifactId: {0.artifact_id:<50}\tVersion: {0.version}}'.format(
+                        pom_info))
+                logging.warning('\t\tPath: {0.path}   Url: {url}'.format(pom_info))
+                logging.warning('\t\tName: {0.name}'.format(pom_info))
+            local_poms = [p for p in parent_pom_info_list if p.path]
+            if len(local_poms) == 1:
+                logging.warning(
+                    "Using only local workspace pom instance: {0.group_id} {0.artifact_id} {0.version}} in path {0.path}".format(
+                        local_poms[0]))
+                display_dependencies_tree(poms_info, local_poms[0], local_only=args.local_only)
+            else:
+                logging.warning("Cannot perform analysis with multiple parent projects.")
+                sys.exit(0)
+        else:
+            display_dependencies_tree(poms_info, parent_pom_info_list[0], local_only=args.local_only)
+
     elif args.checkout_branch:
         if not args.parent_project:
-            print("To get a branch for a project and check the pom versions in the workspace, you must supply a parent project.")
+            print(
+                "To get a branch for a project and check the pom versions in the workspace, you must supply a parent project.")
             parser.usage()
             sys.exit(1)
         if not args.branch:
-            print("To get a branch for a project and check the pom versions in the workspace, you must supply a branch to checkout.")
+            print(
+                "To get a branch for a project and check the pom versions in the workspace, you must supply a branch to checkout.")
             parser.usage()
             sys.exit(1)
-        log_file_path = common_utils.get_log_file_path(args.workspace, "checkout_branch")
 
+        log_file_path = common_utils.get_log_file_path(args.workspace, "checkout_branch")
         common_utils.setup_logger_to_console_file(log_file_path, log_level)
         checkout_branch(args.parent_project, args.workspace, args.branch, args.reset)
         check_poms_against_parent(args.parent_project, args.workspace)
 
+    elif args.check_poms_newer:
+
+        if not args.parent_project:
+            print("To check the pom versions in the workspace, you must supply a parent project.")
+            parser.usage()
+            sys.exit(1)
+        log_file_path = common_utils.get_log_file_path(args.workspace, "check_poms_for_newer_versions")
+        common_utils.setup_logger_to_console_file(log_file_path, log_level)
+        check_for_latest_dependency_versions(args.parent_project, args.workspace)
+
+    elif args.xx_new_function:
+
+        if not args.parent_project:
+            print("To check for newer pom versions, you must supply a parent project.")
+            parser.usage()
+            sys.exit(1)
+        if not args.group_id:
+            print("To check for newer pom versions, you must supply a group id.")
+            parser.usage()
+            sys.exit(1)
+        if not args.version:
+            print("To check for newer pom versions, you must supply a version for the parent module.")
+            parser.usage()
+            sys.exit(1)
+
+        log_file_path = common_utils.get_log_file_path(args.workspace, "check_poms_for_newer_versions")
+        common_utils.setup_logger_to_console_file(log_file_path, log_level)
+        check_for_conflicting_dependency_versions(args.group_id, args.parent_project, args.version)
+
     logging.info('\n\nLog file: {}'.format(log_file_path))
-    if args.open_output:
+    if args.open_output and log_file_path:
         common_utils.open_file_in_editor(log_file_path)
-        

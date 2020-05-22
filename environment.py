@@ -2,8 +2,8 @@
 #
 
 NEXUS_INFO = {"root_url" : "0",
-              "snapshots_rool_url": "https://nexus.priv/maven-proxy/content/groups/all-snapshots/",
-              "released_rool_url": "https://nexus.priv/maven-proxy/content/groups/all-released",
+              "snapshots_root_url": "https://nexus.priv/maven-proxy/content/groups/all-snapshots/",
+              "released_root_url": "https://nexus.priv/maven-proxy/content/groups/all-released",
               }
 
 WORKSPACE_ROOT_ID = "/cygdrive/c/dev/new_workspace"
@@ -79,3 +79,15 @@ FILE_STORAGE_SERVERS = {
                     }
                     
 FILE_STORAGE_IMAGE_ROOT_PATH = "/data/files"
+
+
+GROUP_ID_BASE = "ca.company.project1"
+''' All group ids that start with this are controlled by this organization '''
+
+
+PYTHON_WORKSPACE_PATH = "/cygdrive/c/dev/project1/python_workspace"
+
+
+GIT_REMOTES = [
+    "ssh://git@github.com/project/project1.git",
+]

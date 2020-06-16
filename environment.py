@@ -6,9 +6,17 @@ NEXUS_INFO = {"root_url" : "0",
               "released_root_url": "https://nexus.priv/maven-proxy/content/groups/all-released",
               }
 
+
+GROUP_ID_BASE = "ca.company.project1"
+''' All group ids that start with this are controlled by this organization '''
+
+
 WORKSPACE_ROOT_ID = "/cygdrive/c/dev/new_workspace"
+PYTHON_WORKSPACE_PATH = "/cygdrive/c/dev/project1/python_workspace"
+
 
 LOCAL_LOG_DIRECTORY = "/cygdrive/c/dev/logs"
+
 
 LOG_LOCATIONS = {
                     "localhost": {"prefix":"local", "root": "//cygdrive/C/logs","servers": []},
@@ -79,13 +87,6 @@ FILE_STORAGE_SERVERS = {
                     }
                     
 FILE_STORAGE_IMAGE_ROOT_PATH = "/data/files"
-
-
-GROUP_ID_BASE = "ca.company.project1"
-''' All group ids that start with this are controlled by this organization '''
-
-
-PYTHON_WORKSPACE_PATH = "/cygdrive/c/dev/project1/python_workspace"
 
 
 GIT_REMOTES = [

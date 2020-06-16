@@ -1,13 +1,9 @@
 import argparse
 import datetime
-import itertools
 import logging
 import os.path
 import pathlib
-import pprint
-import re
 import shutil
-import sys
 
 import git
 
@@ -16,9 +12,9 @@ import environment
 
 
 def test():
-    repoPath = "/cygdrive/c/dev/hague/new_workspace/cipo-ec-id-filing"
-    oldBranch = "CIPO-ec-id-filing-4.2.9"
-    newBranch = "Hague_Rel2c"
+    repoPath = "/cygdrive/c/dev/hague/new_workspace/"
+    oldBranch = "old_branch"
+    newBranch = "new_branch"
     r = git.Repo(repoPath)
     r.fetch()
 
@@ -41,7 +37,7 @@ def get_logs(repo, branch=None, tag_name=None):
     if not tag_name:
         tag_name = repo.tags[-1].name
 
-    git = git.Repo(repo.working_dir)
+    new_repo = git.Repo(repo.working_dir)
     logs = repo.log('%s..%s' % (tag_name, branch))
     log_list = []
     commit_info = {}
@@ -98,37 +94,85 @@ def get_local_branch_name(git_repo, br_name):
     return None
 
 
-def compare_against_master_branch(git_repo, branch_name):
-    git_repo.git.pull()
-    master_branch_name = get_remote_branch_name(git_repo, "master")
+def compare_against_master_branch(path, git_repo, branch_name, parent_branch_name):
+    # git_repo.git.pull()
+    git_repo.git.fetch("--all")
+    master_branch_name = get_remote_branch_name(git_repo, parent_branch_name)
     if not master_branch_name:
-        logging.warning("Cannot find master branch for git repo {}.".format(git_repo.working_dir))
+        logging.warning("Cannot find {} branch for git repo {}.".format(parent_branch_name, git_repo.working_dir))
         return None
+    git_repo.git.fetch("--all")
+    git_repo.git.reset("--hard", "origin/{}".format(master_branch_name))
+    last_master_commit = git_repo.head.commit
+    master_commit_date = datetime.datetime.fromtimestamp(last_master_commit.committed_date)
+    commits_msgs_l = []
+    num_commits_ahead = num_commits_behind = 0
+    dev_commit_date = dev_commit_date = None
     develop_branch_name = get_remote_branch_name(git_repo, branch_name)
-    if not develop_branch_name:
-        logging.warning("Cannot find {} branch for git repo {}.".format(branch_name, git_repo.working_dir))
-        return None
-    git_repo.git.checkout(master_branch_name)
-    git_repo.git.pull()
-    git_repo.git.checkout(develop_branch_name)
-    git_repo.git.pull()
+    if develop_branch_name:
+        git_repo.git.checkout(develop_branch_name)
+        git_repo.git.fetch("--all")
+        git_repo.git.reset("--hard", "origin/{}".format(develop_branch_name))
+        last_develop_commit = git_repo.head.commit
+        dev_commit_date = datetime.datetime.fromtimestamp(last_develop_commit.committed_date)
 
-    commit_messages = git_repo.git.log('%s..%s' % (develop_branch_name, master_branch_name),
-                                      '--pretty=format:%ad %an - %s', '--abbrev-commit')
-    # If no commit messages, then the develop branch is up to date with the master branch
-    if commit_messages:
-        commits_msgs_l = commit_messages.splitlines()
-        logging.info("There are {} commits in the {} branch that are not in the {} branch of the {} git repo".format(
-            len(commits_msgs_l), master_branch_name, develop_branch_name, git_repo.working_dir))
+        commit_messages = git_repo.git.log('origin/%s..origin/%s' % (develop_branch_name, master_branch_name),
+                                           '--pretty=format:%ad %an', '--abbrev-commit')
+        # If no commit messages, then the develop branch is up to date with the master branch
+        if commit_messages:
+            num_commits_behind = len(commit_messages.splitlines())
+            # rootLogger = logging.getLogger()
+            # if rootLogger.isEnabledFor(logging.DEBUG):
+            # logging.debug("Commits in {} but not in {}: {}".format(develop_branch_name, master_branch_name, commit_messages.splitlines()))
+        commit_messages = git_repo.git.log('origin/%s..origin/%s' % (master_branch_name, develop_branch_name),
+                                           '--pretty=format:%ad %an', '--abbrev-commit')
+        # If no commit messages, then the master branch is up to date with the develop branch
+        if commit_messages:
+            num_commits_ahead = len(commit_messages.splitlines())
+            # rootLogger = logging.getLogger()
+            # if rootLogger.isEnabledFor(logging.DEBUG):
+            # logging.debug("Commits in {} but not in {}: {}".format(develop_branch_name, master_branch_name, commit_messages.splitlines()))
     else:
-        logging.info("The {} branch is up to date with the {} branch of the {} git repo".format(develop_branch_name,
-                                                                                                master_branch_name,
-                                                                                                git_repo.working_dir))
+        develop_branch_name = ""
+
+    master_commit_date_str = master_commit_date.strftime('%Y-%m-%d %H:%M:%S') if master_commit_date else ""
+    dev_commit_date_str = dev_commit_date.strftime('%Y-%m-%d %H:%M:%S') if dev_commit_date else ""
+    logging.info("{:<40}  {:<20}  {:<20}  {:<20}  {:<20}  {:4}               {:4}".format(path.name, master_branch_name,
+                                                                                          master_commit_date_str,
+                                                                                          develop_branch_name,
+                                                                                          dev_commit_date_str,
+                                                                                          num_commits_ahead,
+                                                                                          num_commits_behind))
 
 
-def compare_against_master_branch_in_workspace(root_path_str, branch_name):
+def compare_against_master_branch_in_workspace(root_path_str, branch_name, parent_branch_name):
     root_path = pathlib.Path(root_path_str)
 
+    logging.getLogger("git").setLevel(logging.WARNING)
+    logging.info("{:<40}  {:<20}  {:<20}  {:<20}  {:<20}  # Commits Ahead    # Commits Behind".format("Repository",
+                                                                                                      "Master branch",
+                                                                                                      "Date last commit",
+                                                                                                      "Develop branch",
+                                                                                                      "Date last commit",
+                                                                                                      "#"))
+    for path in root_path.iterdir():
+        if path.is_dir():
+            try:
+                repo = git.Repo(path)
+            except:
+                logging.debug("**** path {0} was found to not be a git repo. ********".format(path))
+                continue
+            if repo:
+                if repo.is_dirty() and not root_path.samefile(environment.PYTHON_WORKSPACE_PATH):
+                    logging.warning("{} contains modifications and do not want to overwrite them.".format(path))
+                else:
+                    compare_against_master_branch(path, repo, branch_name, parent_branch_name)
+
+
+def list_branches_in_workspace(root_path_str, branches_to_show):
+    root_path = pathlib.Path(root_path_str)
+
+    logging.getLogger("git").setLevel(logging.WARNING)
     for path in root_path.iterdir():
         if path.is_dir():
             try:
@@ -137,20 +181,7 @@ def compare_against_master_branch_in_workspace(root_path_str, branch_name):
                 logging.debug("**** path {0} was found to not be a git repo. ********".format(path))
                 continue
             if repo:
-                compare_against_master_branch(repo, branch_name)
-
-
-def list_branches_in_workspace(root_path_str):
-    root_path = pathlib.Path(root_path_str)
-
-    for path in root_path.iterdir():
-        if path.is_dir():
-            try:
-                repo = git.Repo(path, search_parent_directories=True)
-            except:
-                logging.debug("**** path {0} was found to not be a git repo. ********".format(path))
-                continue
-            if repo:
+                repo.git.fetch("--all")
                 dev_branch_name = get_remote_branch_name(repo, "develop")
                 if not dev_branch_name:
                     dev_branch_name = "<unknown>"
@@ -158,11 +189,18 @@ def list_branches_in_workspace(root_path_str):
                 if not master_branch_name:
                     master_branch_name = "<unknown>"
 
+                current_branch = repo.head.ref.name
+
                 branches = [br.strip() for br in repo.git.branch('-a').splitlines()]
-                logging.info("Branches for git repo in {}:".format(repo.working_dir))
+                if branches_to_show != "*":
+                    branches = [branch for branch in branches if branch.endswith(branches_to_show)]
+                logging.info("{} Branches for git repo in {}:".format(branches_to_show, repo.working_dir))
                 for br in branches:
                     logging.info("\t{}".format(br))
-                logging.info("Develop branch: {:<40}  master branch: {}\n".format(dev_branch_name, master_branch_name))
+                logging.info(
+                    "Develop branch: {:<30}  master branch: {:<30}  current branch: {}\n".format(dev_branch_name,
+                                                                                                 master_branch_name,
+                                                                                                 current_branch))
 
 
 def create_workspace(workspace_str):
@@ -282,6 +320,7 @@ def checkout_same_branch_in_workspace(workspace_path_str, branch_name):
                 logging.debug("**** path {0} was found to not be a git repo. ********".format(path))
                 continue
             if repo:
+                repo.git.fetch("--all")
                 remote_br_name = get_remote_branch_name(repo, branch_name)
                 if remote_br_name:
                     repo.git.checkout(remote_br_name)
@@ -292,11 +331,130 @@ def checkout_same_branch_in_workspace(workspace_path_str, branch_name):
                     logging.info("The git repo {} does not have a branch '{}'".format(path, branch_name))
 
 
+def check_status(workspace_path_str):
+    root_path = pathlib.Path(workspace_path_str)
+
+    for path in root_path.iterdir():
+        if path.is_dir():
+            try:
+                repo = git.Repo(path, search_parent_directories=True)
+            except:
+                logging.debug("**** path {0} was found to not be a git repo. ********".format(path))
+                continue
+            if repo:
+                repo.git.fetch("--all")
+
+                current_branch = repo.head.ref.name
+                remote_branch = "origin/{0}".format(current_branch)
+                commits_behind = [c for c in repo.iter_commits('{0}..{1}'.format(current_branch, remote_branch))]
+                num_behind = len(commits_behind)
+                commits_ahead = [c for c in repo.iter_commits('{0}..{1}'.format(remote_branch, current_branch))]
+                num_ahead = len(commits_ahead)
+                ahead_str = "\033[93m{} commits ahead remote\033[0m".format(num_ahead) if num_ahead > 0 else ""
+                behind_str = "\033[93m{} commits behind remote\033[0m".format(num_behind) if num_behind > 0 else ""
+                if num_ahead == 0 and num_behind == 0:
+                    ahead_str = "\033[92mUp to date with remote\033[0m"
+                logging.info(
+                    "\033[94m{:<40}\033[0m on branch: {:<25}   {}   {}".format(path.name, current_branch, ahead_str,
+                                                                               behind_str))
+                if repo.is_dirty():
+                    changed_files = [item.a_path for item in repo.index.diff(None)]
+                    logging.info("\tModified local files:")
+                    for file in changed_files:
+                        logging.info("\t\t\033[95m{}\033[0m".format(file))
+                root_logger = logging.getLogger()
+                if root_logger.isEnabledFor(logging.DEBUG) and num_ahead > 0:
+                    for commit in commits_ahead:
+                        logging.debug(
+                            "\tCommit ahead: {}  {}  {}".format(datetime.datetime.fromtimestamp(commit.committed_date),
+                                                                commit.author, commit.message))
+                if root_logger.isEnabledFor(logging.DEBUG) and num_behind > 0:
+                    for commit in commits_behind:
+                        logging.debug(
+                            "\tCommit behind: {}  {}  {}".format(datetime.datetime.fromtimestamp(commit.committed_date),
+                                                                 commit.author, commit.message))
+
+                logging.info(" ")
+            else:
+                logging.debug("path {} is not a git repo.\n".format(path))
+
+
+def steps_to_merge_forward(path, to_branch_name, from_branch_name, force_rebase=None):
+    try:
+        repo = git.Repo(path, search_parent_directories=True)
+    except:
+        logging.debug("**** path {0} was found to not be a git repo. ********".format(path))
+        return
+
+    if repo:
+        if repo.is_dirty():
+            logging.warning("Not going to try to merge when there are changes not committed.")
+            return
+
+        if not repo.index.unmerged_blobs():
+            current_branch = repo.head.ref.name
+            if current_branch != to_branch_name:
+                logging.info("git checkout {}".format(to_branch_name))
+                repo.git.checkout(to_branch_name)
+
+            try:
+                if force_rebase:
+                    logging.info("git merge {}".format(from_branch_name))
+                    repo.git.merge(from_branch_name, "-X patience")
+                else:
+                    logging.info("git merge {}".format(from_branch_name))
+                    repo.git.merge(from_branch_name)
+            except git.exc.GitCommandError as gce:
+                logging.warning(
+                    "GitCommandError thrown while trying to merge {} into {}".format(from_branch_name, to_branch_name),
+                    gce)
+
+        conflicted_files = []
+        unmerged_blobs = repo.index.unmerged_blobs()
+        if unmerged_blobs:
+            # We're really interested in the stage each blob is associated with.
+            # So we'll iterate through all of the paths and the entries in each value
+            # list, but we won't do anything with most of the values.
+            for (path, list_of_blobs) in unmerged_blobs.items():
+                for (stage, blob) in list_of_blobs:
+                    # Now we can check each stage to see whether there were any conflicts
+                    if stage != 0:
+                        conflicted_files.append(path)
+        else:
+            logging.debug("No unmerged files.")
+
+        if conflicted_files:
+            logging.info(
+                "Please resolve the following files, add them to the commit, and then run the same command for this script again to complete the merge")
+            for f in conflicted_files:
+                logging.info("\t- {}".format(f))
+            return
+        else:
+            logging.debug("No conflicting files.")
+
+        if len(repo.index.diff("HEAD")) > 0:
+            logging.info("need to git commit")
+            # repo.index.commit()
+        else:
+            logging.debug("No differences with HEAD, so no need to commit ")
+
+        commit_messages = repo.git.log('origin/{0}..{0}'.format(to_branch_name), '--oneline')
+        # If no commit messages, then the local branch is up to date with the remote branch
+        num_commits = len(commit_messages.splitlines()) > 0 if commit_messages else 0
+        if num_commits > 0:
+            logging.info("git push because need to push {} commits to remote".format(num_commits))
+            repo.remotes.origin.push()
+        else:
+            logging.debug("No differences with remote origin, so no need to push")
+    else:
+        logging.warning("Did not get a git repo from the path {}. ********".format(path))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     action_group = parser.add_mutually_exclusive_group(required=True)
-    action_group.add_argument("-l", "--list_branches", dest="list_branches", action="store_true",
-                              help="testing new functionality")
+    action_group.add_argument("-l", "--list_branches", dest="list_branches", nargs="?", default=None, const="*",
+                              help="List the branches of all the git repos in the workspace")
     action_group.add_argument("-c", "--create_workspace", dest="create_workspace", action="store_true",
                               help="Create a new workspace")
     action_group.add_argument("-u", "--uptodate", dest="uptodate_master", action="store_true",
@@ -305,8 +463,10 @@ if __name__ == "__main__":
                               help="Pull the develop and master branches for all repos in the workspace")
     action_group.add_argument("-e", "--checkout", dest="checkout", action="store_true",
                               help="Checkout the specified branch in all git repos, if it already exists, in the workspace.")
-    action_group.add_argument("-s", "--prerelease", dest="prerelease_check", action="store_true",
-                              help="testing functionality currently working on.")
+    action_group.add_argument("-r", "--prerelease", dest="prerelease_check", action="store_true",
+                              help="Perform pre-release check on the specified branch of the specified module")
+    action_group.add_argument("-s", "--status", dest="status", action="store_true",
+                              help="Display the git status for all repositories in the specified workspace.")
     action_group.add_argument("-x", "--xx_test", dest="xx_new_function", action="store_true",
                               help="testing functionality currently working on.")
     parser.add_argument("-w", "--workspace", dest="workspace",
@@ -318,8 +478,10 @@ if __name__ == "__main__":
                         help="Module to use. Must be a sub directory of the workspace directory.", )
     parser.add_argument("-b", "--branch", dest="branch_name", default="develop",
                         help="Branch to compare to master branch or to checkout. Defaults to '%(default)s'.", )
-    parser.add_argument("-r", "--repo", dest="repo_path",
-                        help="Branch to compare to master branch. Defaults to '%(default)s'.", )
+    parser.add_argument("--parent_branch", dest="parent_branch_name", default="master",
+                        help="Branch to compare against. Defaults to '%(default)s'.", )
+    parser.add_argument("--repo", dest="repo_path",
+                        help="Path to repository to use, instead of checking all repositories in a workspace.", )
     parser.add_argument("-v", "--verbose", dest="verbose", action="store_true",
                         help="Flag to print verbose log messages.")
     parser.add_argument("-f", "--force", dest="force", action="store_true",
@@ -332,19 +494,23 @@ if __name__ == "__main__":
     log_level = logging.DEBUG if args.verbose else logging.INFO
     log_file_path = None
 
+    logging.getLogger("git").setLevel(logging.WARNING)
+
     workspace_path_str = environment.PYTHON_WORKSPACE_PATH if args.use_python_workspace else args.workspace
 
     if args.list_branches:
         log_file_path = common_utils.get_log_file_path("~/reports", "git_tasks_list_branches")
         common_utils.setup_logger_to_console_file(log_file_path, log_level)
 
-        logging.info("Listing the branches for git repos in the workspace {}.\n".format(workspace_path_str))
-        list_branches_in_workspace(workspace_path_str)
+        logging.info("Listing the branches for git repos in the workspace {}.\n\n".format(workspace_path_str))
+        list_branches_in_workspace(workspace_path_str, args.list_branches)
 
     elif args.create_workspace:
         log_file_path = common_utils.get_log_file_path("~/reports", "git_tasks_create_workspace")
         common_utils.setup_logger_to_console_file(log_file_path, log_level)
         root_path = pathlib.Path(workspace_path_str)
+
+        logging.info("Creating a new workspace in {}.\n\n".format(workspace_path_str))
         if args.force and root_path.is_dir() and any(root_path.iterdir()):
             logging.info(
                 "Deleting all existing files and directories from {} before creating a new workspace".format(root_path))
@@ -358,6 +524,7 @@ if __name__ == "__main__":
         if args.repo_path:
             path = pathlib.Path(args.repo_path)
             if path.is_dir():
+                repo = None
                 try:
                     repo = git.Repo(path, search_parent_directories=True)
                 except:
@@ -400,37 +567,71 @@ if __name__ == "__main__":
     elif args.uptodate_master:
         log_file_path = common_utils.get_log_file_path("~/reports", "git_tasks_uptodate_master")
         common_utils.setup_logger_to_console_file(log_file_path, log_level)
-
         if args.repo_path:
             path = pathlib.Path(args.repo_path)
             if path.is_dir():
+                repo = None
                 try:
                     repo = git.Repo(path, search_parent_directories=True)
                 except:
                     logging.debug("**** path {0} was found to not be a git repo. ********".format(path))
                 if repo:
-                    compare_against_master_branch(repo, args.branch_name)
-
+                    logging.info(
+                        "Checking to see if git repos in {} have their {} branch up to date with their master branch.\n\n".format(
+                            workspace_path_str, args.branch_name))
+                    logging.info("{:<40}  {:<20}  {:<20}  {:<20}  {:<20}  # Commits Ahead    # Commits Behind".format(
+                        "Repository", "Master branch", "Date last commit", "Develop branch", "Date last commit", "#"))
+                    compare_against_master_branch(path, repo, args.branch_name, args.parent_branch_name)
+                else:
+                    logging.warning("The repo path {} is not a valid git repo to check.".format(path))
+            else:
+                logging.warning("The repo path {} is does not exist or is not a directory.".format(path))
         else:
-            compare_against_master_branch_in_workspace(workspace_path_str, args.branch_name)
+            logging.info(
+                "Checking to see if git repos in {} have their {} branch up to date with their master branch.\n\n".format(
+                    workspace_path_str, args.branch_name))
+            compare_against_master_branch_in_workspace(workspace_path_str, args.branch_name, args.parent_branch_name)
 
     elif args.prerelease_check:
+        if not args.branch_name or not args.module_name:
+            parser.error(
+                "The branch name (-b <value> or --branch <value>) and module name (-m <value> or --module <value>) options are required to perform a pre-release check.")
         log_file_path = common_utils.get_log_file_path("~/reports", "git_tasks_prerelease_check")
         common_utils.setup_logger_to_console_file(log_file_path, log_level)
 
+        logging.info("Performing pre-release check on the {} branch of the {} module in the {} workspace.\n\n".format(
+            args.branch_name, args.module_name, workspace_path_str))
         prerelease_check(workspace_path_str, args.branch_name, args.module_name)
 
     elif args.checkout:
         log_file_path = common_utils.get_log_file_path("~/reports", "git_tasks_checkout")
         common_utils.setup_logger_to_console_file(log_file_path, log_level)
 
+        logging.info(
+            "Checkout the {} branch of each git repo in the {} workspace if it exists.\n\n".format(args.branch_name,
+                                                                                                   workspace_path_str))
         checkout_same_branch_in_workspace(workspace_path_str, args.branch_name)
 
-    elif args.xx_new_function:
-        log_file_path = common_utils.get_log_file_path("~/reports", "git_tasks_test")
+    elif args.status:
+        log_file_path = common_utils.get_log_file_path("~/reports", "git_tasks_status")
         common_utils.setup_logger_to_console_file(log_file_path, log_level)
 
-        prerelease_check(workspace_path_str, args.branch_name, args.module_name)
+        logging.info("Check the git status of all repos in the workspace {}.\n\n".format(workspace_path_str))
+        check_status(workspace_path_str)
+
+    elif args.xx_new_function:
+        if not args.branch_name or not args.module_name:
+            parser.error(
+                "The branch name (-b <value> or --branch <value>) and module name (-m <value> or --module <value>) options are required to perform a pre-release check.")
+
+        log_file_path = common_utils.get_log_file_path("~/reports", "git_tasks_merge_forward")
+        common_utils.setup_logger_to_console_file(log_file_path, log_level)
+        repo_path = pathlib.Path(workspace_path_str).joinpath(args.module_name)
+        logging.info(
+            "Attempting to merge/rebase the {} parent branch to the {} branch in the git repo in {}.\n\n".format(
+                args.parent_branch_name, args.branch_name, repo_path))
+
+        steps_to_merge_forward(repo_path, args.branch_name, args.parent_branch_name, force_rebase=args.force)
 
     logging.info('\n\nLog file: {}'.format(log_file_path))
     if args.open_output and log_file_path:

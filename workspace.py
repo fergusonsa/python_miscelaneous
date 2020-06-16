@@ -1,17 +1,11 @@
 import argparse
-import datetime
-import itertools
 import logging
-import os.path
 import pathlib
 import pprint
-import re
 import sys
-import xml.etree.ElementTree as ET
 
 import git
 import requests
-from bs4 import BeautifulSoup
 
 import common_utils
 import environment
@@ -27,7 +21,7 @@ def get_git_info(path):
         return {"repo_url": repo.remotes.origin.url,
                 "branch": repo.active_branch.name}
     except:
-        logging.warning("**** path {0} was found to not be a git repo. ********".format(path))
+        logging.warn("**** path {0} was found to not be a git repo. ********".format(path))
         return {"repo_url": "Not git repo",
                 "branch": "Not git repo"}
 
@@ -45,14 +39,14 @@ def find_available_versions_of_artifact(group_id, artifact_id):
         try:
             artifact_list_page = requests.get(artifact_url, headers=headers)
         except Exception as ex:
-            logging.warning(
+            logging.warn(
                 "Could not get artifact_url {} for group_id {} and artifact_id {}. Exception {}".format(artifact_url,
                                                                                                         group_id,
                                                                                                         artifact_id,
                                                                                                         ex.getMessage()))
             continue
         if artifact_list_page.status_code != requests.codes.ok:
-            logging.warning(
+            logging.warn(
                 "Could not get artifact_url {} for group_id {} and artifact_id {}. status_code {}".format(artifact_url,
                                                                                                           group_id,
                                                                                                           artifact_id,
@@ -128,48 +122,48 @@ def document_workspace(root_path):
         v = poms_info[key]
         if not v.path:
             continue
-        logging.info('GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}}'.format(v))
+        logging.info('GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}'.format(v))
         logging.info('Path: {0.path}'.format(v))
         logging.info('Name: {0.name}'.format(v))
         repo_info = get_git_info(v.path)
-        logging.info("Git repo: {repo_url}".format(**repo_info))
-        logging.info("Git branch: {branch}".format(**repo_info))
+        logging.info("\tGit repo: {repo_url}".format(**repo_info))
+        logging.info("\tGit branch: {branch}".format(**repo_info))
 
         if v.modules:
-            logging.info('Modules:')
+            logging.info('\tModules:')
             for mod_key in sorted(v.modules.keys()):
                 mod_info = v.modules[mod_key]
                 if mod_info:
-                    pom_key = "groupId:{0.group_id};artifactId:{0.artifact_id};version:{0.version}}".format(mod_info)
+                    pom_key = "groupId:{0.group_id};artifactId:{0.artifact_id};version:{0.version}".format(mod_info)
                     logging.info(
-                        ' -- GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}}'.format(
+                        '\t\t-- GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}'.format(
                             mod_info))
                     if pom_key in poms_info and poms_info[pom_key].path:
-                        logging.info('    LOCAL ENVIRONMENT COPY')
+                        logging.info('\t\t    LOCAL ENVIRONMENT COPY')
                 else:
-                    logging.warning(
+                    logging.warn(
                         "Empty Modules mod_info for key '{}' for pom groupId: {} artifactId: {} version: {}".format(
                             mod_key, v.group_id, v.artifact_id, v.version))
-        if v['dependenciesManagement']:
-            logging.info('Managed Dependencies:')
-            for dep_key in sorted(v['dependenciesManagement'].keys()):
-                dep_info = v['dependenciesManagement'][dep_key]
-                pom_key = "groupId:{0.group_id};artifactId:{0.artifact_id};version:{0.version}}".format(dep_info)
+        if v.managed_dependencies:
+            logging.info('\tManaged Dependencies:')
+            for dep_key in sorted(v.managed_dependencies.keys()):
+                dep_info = v.managed_dependencies[dep_key]
+                pom_key = "groupId:{0.group_id};artifactId:{0.artifact_id};version:{0.version}".format(dep_info)
                 logging.info(
-                    ' -- GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}}'.format(
+                    '\t\t-- GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}'.format(
                         dep_info))
                 if pom_key in poms_info and poms_info[pom_key].path:
-                    logging.info('    LOCAL ENVIRONMENT COPY')
+                    logging.info('\t\t    LOCAL ENVIRONMENT COPY')
         if v.dependencies:
-            logging.info('Dependencies:')
+            logging.info('\tDependencies:')
             for dep_key in sorted(v.dependencies.keys()):
                 dep_info = v.dependencies[dep_key]
                 pom_key = "groupId:{0.group_id};artifactId:{0.artifact_id};version:{0.version}".format(dep_info)
                 logging.info(
-                    ' -- GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}'.format(
+                    '\t\t-- GroupId: {0.group_id:<35}  ArtifactId: {0.artifact_id:<50}  Version: {0.version}'.format(
                         dep_info))
                 if pom_key in poms_info and poms_info[pom_key].path:
-                    logging.info('    LOCAL ENVIRONMENT COPY')
+                    logging.info('\t\t    LOCAL ENVIRONMENT COPY')
         logging.info(" ")
 
 
@@ -270,15 +264,15 @@ def check_poms_against_parent(parent_project_name, workspace):
                                                                                                   workspace))
         sys.exit(0)
     if len(parent_pom_info_list) > 1:
-        logging.warning(
+        logging.warn(
             "Found multiple parent projects with artifactId of '{0}' in the workspace {1}.".format(parent_project_name,
                                                                                                    workspace))
         for pom_info in parent_pom_info_list:
-            logging.warning(
+            logging.warn(
                 '\tGroupId: {0.group_id:<35}\tArtifactId: {0.artifact_id:<50}\tVersion: {0.version}}'.format(pom_info))
-            logging.warning('\t\tPath: {0.path}'.format(pom_info))
-            logging.warning('\t\tName: {0.name}'.format(pom_info))
-        logging.warning("Cannot perform analysis with multiple parent projects.")
+            logging.warn('\t\tPath: {0.path}'.format(pom_info))
+            logging.warn('\t\tName: {0.name}'.format(pom_info))
+        logging.warn("Cannot perform analysis with multiple parent projects.")
         sys.exit(0)
     parent_pom_info = parent_pom_info_list[0]
     logging.info(
@@ -294,7 +288,7 @@ def check_poms_against_parent(parent_project_name, workspace):
     display_modules(poms_info, parent_pom_info)
 
     logging.info('Managed Dependencies:')
-    display_dependencies(poms_info, parent_pom_info['dependenciesManagement'].values())
+    display_dependencies(poms_info, parent_pom_info.managed_dependencies.values())
     logging.info('Dependencies:')
     display_dependencies(poms_info, parent_pom_info.dependencies.values())
 
@@ -408,9 +402,10 @@ def display_dependencies_tree(all_poms, pom_info, indent_prefix_str=None, displa
                                                       displayed_modules_l=displayed_modules_l, local_only=local_only,
                                                       show_max_versions=show_max_versions)
                         else:
-                            logging.info(
-                                "{}----- {:<35}  {:<50}  {}  ^^".format(mod_indent_prefix, pom_info.group_id, mod_key,
-                                                                        pom_info.version))
+                            logging.info("{}----- {:<35}  {:<50}  {}  ^^ already displayed".format(mod_indent_prefix,
+                                                                                                   pom_info.group_id,
+                                                                                                   mod_key,
+                                                                                                   pom_info.version))
                     else:
                         logging.info("{}----- {:<35}  {:<50}  {}".format(mod_indent_prefix, pom_info.group_id, mod_key,
                                                                          pom_info.version))
@@ -423,8 +418,10 @@ def display_dependencies_tree(all_poms, pom_info, indent_prefix_str=None, displa
                                                                   artifact_id=dep_info.artifact_id,
                                                                   version=dep_info.version)
                     if not dep_pom_info_list:
-                        logging.info("{}----- {:<35}  {:<50}  {} ??".format(mod_indent_prefix, dep_info.group_id,
-                                                                            dep_info.artifact_id, dep_info.version))
+                        logging.info("{}----- {:<35}  {:<50}  {} ?? cound not find pom".format(mod_indent_prefix,
+                                                                                               dep_info.group_id,
+                                                                                               dep_info.artifact_id,
+                                                                                               dep_info.version))
                     elif dep_info.version == dep_pom_info_list[0].version:
                         full_key = maven_utils.get_pom_key(dep_info)
                         if full_key not in displayed_modules_l:
@@ -434,9 +431,10 @@ def display_dependencies_tree(all_poms, pom_info, indent_prefix_str=None, displa
                                                       displayed_modules_l=displayed_modules_l, local_only=local_only,
                                                       show_max_versions=show_max_versions)
                         else:
-                            logging.info("{}----- {:<35}  {:<50}  {}  ^^".format(mod_indent_prefix, dep_info.group_id,
-                                                                                 dep_info.artifact_id,
-                                                                                 dep_info.version))
+                            logging.info("{}----- {:<35}  {:<50}  {}  ^^ already displayed".format(mod_indent_prefix,
+                                                                                                   dep_info.group_id,
+                                                                                                   dep_info.artifact_id,
+                                                                                                   dep_info.version))
                     elif dep_pom_info_list[0].path:
                         logging.info("{}----- {:<35}  {:<50}  {:<13} #{} Local version is {}".format(mod_indent_prefix,
                                                                                                      dep_info.group_id,
@@ -470,9 +468,10 @@ def display_dependencies_tree(all_poms, pom_info, indent_prefix_str=None, displa
                                                       displayed_modules_l=displayed_modules_l, local_only=local_only,
                                                       show_max_versions=show_max_versions)
                         else:
-                            logging.info("{}----- {:<35}  {:<50}  {}  ^^".format(dep_indent_prefix, dep_info.group_id,
-                                                                                 dep_info.artifact_id,
-                                                                                 dep_info.version))
+                            logging.info("{}----- {:<35}  {:<50}  {}  ^^ already displayed".format(dep_indent_prefix,
+                                                                                                   dep_info.group_id,
+                                                                                                   dep_info.artifact_id,
+                                                                                                   dep_info.version))
                     elif dep_pom_info_list[0].path:
                         logging.info("{}----- {:<35}  {:<50}  {:<13} #{} Local version is {}".format(dep_indent_prefix,
                                                                                                      dep_info.group_id,
@@ -504,15 +503,15 @@ def check_for_latest_dependency_versions(parent_project_name, workspace):
                                                                                                   workspace))
         sys.exit(0)
     if len(parent_pom_info_list) > 1:
-        logging.warning(
+        logging.warn(
             "Found multiple parent projects with artifactId of '{0}' in the workspace {1}.".format(parent_project_name,
                                                                                                    workspace))
         for pom_info in parent_pom_info_list:
-            logging.warning(
+            logging.warn(
                 '\tGroupId: {0.group_id:<35}\tArtifactId: {0.artifact_id:<50}\tVersion: {0.version}}'.format(pom_info))
-            logging.warning('\t\tPath: {0.path}'.format(pom_info))
-            logging.warning('\t\tName: {0.name}'.format(pom_info))
-        logging.warning("Cannot perform analysis with multiple parent projects.")
+            logging.warn('\t\tPath: {0.path}'.format(pom_info))
+            logging.warn('\t\tName: {0.name}'.format(pom_info))
+        logging.warn("Cannot perform analysis with multiple parent projects.")
         sys.exit(0)
     parent_pom_info = parent_pom_info_list[0]
     parent_pom_info.available_versions = find_available_versions_of_artifact(parent_pom_info.group_id,
@@ -527,7 +526,7 @@ def check_for_latest_dependency_versions(parent_project_name, workspace):
             dep_info.pom_info.available_versions = find_available_versions_of_artifact(dep_info.pom_info.group_id,
                                                                                        dep_info.pom_info.artifact_id)
 
-    # 9:29 AM 2020-05-15    WORKING HERE          
+    # 9:29 AM 2020-05-15    WORKING HERE
     display_dependencies_tree(poms_info, parent_pom_info, show_max_versions=True)
 
 
@@ -593,6 +592,9 @@ if __name__ == "__main__":
     log_level = logging.DEBUG if args.verbose else logging.INFO
     log_file_path = None
 
+    logging.getLogger("git").setLevel(logging.WARNING)
+    logging.getLogger("requests").setLevel(logging.WARNING)
+
     if args.document:
         log_file_path = common_utils.get_log_file_path(args.workspace, "document_workspace_dependencies")
         common_utils.setup_logger_to_console_file(log_file_path, log_level)
@@ -625,22 +627,22 @@ if __name__ == "__main__":
                 args.parent_project, args.workspace))
             sys.exit(0)
         if len(parent_pom_info_list) > 1:
-            logging.warning("Found multiple parent projects with artifactId of '{0}' in the workspace {1}.".format(
+            logging.warn("Found multiple parent projects with artifactId of '{0}' in the workspace {1}.".format(
                 args.parent_project, args.workspace))
             for pom_info in parent_pom_info_list:
-                logging.warning(
+                logging.warn(
                     '\tGroupId: {0.group_id:<35}\tArtifactId: {0.artifact_id:<50}\tVersion: {0.version}}'.format(
                         pom_info))
-                logging.warning('\t\tPath: {0.path}   Url: {url}'.format(pom_info))
-                logging.warning('\t\tName: {0.name}'.format(pom_info))
+                logging.warn('\t\tPath: {0.path}   Url: {url}'.format(pom_info))
+                logging.warn('\t\tName: {0.name}'.format(pom_info))
             local_poms = [p for p in parent_pom_info_list if p.path]
             if len(local_poms) == 1:
-                logging.warning(
+                logging.warn(
                     "Using only local workspace pom instance: {0.group_id} {0.artifact_id} {0.version}} in path {0.path}".format(
                         local_poms[0]))
                 display_dependencies_tree(poms_info, local_poms[0], local_only=args.local_only)
             else:
-                logging.warning("Cannot perform analysis with multiple parent projects.")
+                logging.warn("Cannot perform analysis with multiple parent projects.")
                 sys.exit(0)
         else:
             display_dependencies_tree(poms_info, parent_pom_info_list[0], local_only=args.local_only)

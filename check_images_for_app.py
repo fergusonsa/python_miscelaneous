@@ -6,7 +6,7 @@ import common_utils
 import environment
 
 
-def check_images_for_application(env_name, app_number, extension):
+def get_files_list_for_application(env_name, app_number, extension):
     command = "ls {}/{}/{}/{}/{}/".format(environment.FILE_STORAGE_IMAGE_ROOT_PATH, app_number[0:2], app_number[2:4],
                                           app_number[4:6], extension)
     try:
@@ -16,35 +16,16 @@ def check_images_for_application(env_name, app_number, extension):
 
     except subprocess.CalledProcessError as e:
         logging.error("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output), e)
-        return None, None
+        return []
 
     if result and result.returncode == 0:
-        files_l = result.stdout.decode().splitlines()
-        thumbs = [f for f in files_l if f.startswith("t")]
-        fulls = [f for f in files_l if not f.startswith("t")]
-        num_thumbnails = len(thumbs)
-        num_full_images = len(fulls)
-        logging.debug(
-            "Found {} thumbnails and {} full images for application {} {}".format(num_thumbnails, num_full_images,
-                                                                                  app_number, extension))
-        if len(files_l) > 0:
-            logging.debug("{} Files for application {} {}: {}".format(len(files_l), app_number, extension, files_l))
-            missing_thumbs = [f for f in fulls if "t{}.png".format(f[0:-4]) not in thumbs]
-            missing_fulls = [f for f in thumbs if
-                             "{}.jpg".format(f[1:-4]) not in fulls and "{}.tif".format(f[1:-4]) not in fulls]
-            if missing_fulls:
-                logging.warn(
-                    "Missing full images for these {} thumbnails: {}".format(len(missing_fulls), missing_fulls))
-            if missing_thumbs:
-                logging.warn(
-                    "Missing thumbnails for these {} full images: {}".format(len(missing_thumbs), missing_thumbs))
+        return result.stdout.decode().splitlines()
     elif result and result.returncode != 0:
-        num_thumbnails = num_full_images = None
         if result.returncode == 2 and result.stderr.decode().endswith(" does not exist.\n"):
             logging.debug(
                 "SSH command '{}' did not find any files for application {} {}".format(command, app_number, extension))
         else:
-            logging.warn(
+            logging.warning(
                 "SSH command '{}' failed with returncode {} and stderr {} for application {} {}".format(command,
                                                                                                         result.returncode,
                                                                                                         result.stderr.decode(),
@@ -54,7 +35,59 @@ def check_images_for_application(env_name, app_number, extension):
         logging.error(
             "SSH command '{}' failed with and did not return a result for application {} {}".format(command, app_number,
                                                                                                     extension))
-        num_thumbnails = num_full_images = None
+    return []
+
+
+def check_images_for_application(env_name, app_number, extension):
+    num_thumbnails = 0
+    num_full_images = 0
+    files_l = get_files_list_for_application(env_name, app_number, extension)
+    if files_l and len(files_l) > 0:
+        thumbs_d = {
+            f: {"base": f[1:-4], "base#": int(f[1:f.find("_")]), "version": int(f[f.find("_") + 1:-4]), "name": f} for f
+            in files_l if f.startswith("t")}
+        max_thumbs = {v["base#"]: v for (k, v) in thumbs_d.items() if v["version"] == max(
+            list([vv["version"] for vv in thumbs_d.values() if vv["base#"] == v["base#"]]))}
+        fulls_d = {
+            f: {"base": f[0:-4], "base#": int(f[0:f.find("_")]), "version": int(f[f.find("_") + 1:-4]), "name": f} for f
+            in files_l if not f.startswith("t")}
+        max_fulls = {v["base#"]: v for (k, v) in fulls_d.items() if
+                     v["version"] == max(list([vv["version"] for vv in fulls_d.values() if vv["base#"] == v["base#"]]))}
+        logging.debug("{} Files for application {} {}: {}".format(len(files_l), app_number, extension, files_l))
+
+        missing_thumbs_d = {k: v for (k, v) in max_fulls.items() if k not in max_thumbs}
+        missing_fulls_d = {k: v for (k, v) in max_thumbs.items() if k not in max_fulls}
+        num_thumbnails = len(max_thumbs)
+        num_full_images = len(max_fulls)
+
+        logging.debug("Found {} thumbnails and {} full images for appl # {} {}".format(num_thumbnails, num_full_images,
+                                                                                       app_number, extension))
+        if missing_fulls_d:
+            logging.warning(
+                "Missing full images for these {} thumbnails: {}".format(len(missing_fulls_d),
+                                                                         [v["name"] for v in missing_fulls_d.values()]))
+        if missing_thumbs_d:
+            logging.warning(
+                "Missing thumbnails for these {} full images: {}".format(len(missing_thumbs_d), [v["name"] for v in
+                                                                                                 missing_thumbs_d.values()]))
+
+        # thumbs = [f for f in files_l if f.startswith("t")]
+        # fulls = [f for f in files_l if not f.startswith("t")]
+        # num_thumbnails = len(thumbs)
+        # num_full_images = len(fulls)
+        # missing_thumbs = [f for f in fulls if "t{}.png".format(f[0:-4]) not in thumbs]
+        # missing_fulls = [f for f in thumbs if
+        # "{}.jpg".format(f[1:-4]) not in fulls and "{}.tif".format(f[1:-4]) not in fulls]
+        # if missing_fulls:
+        # logging.warning(
+        # "Missing full images for these {} thumbnails: {}".format(len(missing_fulls), missing_fulls))
+        # if missing_thumbs:
+        # logging.warning(
+        # "Missing thumbnails for these {} full images: {}".format(len(missing_thumbs), missing_thumbs))
+    else:
+        logging.info(
+            "No files found for application {} {}. Could have been an error checking, see previous messages.".format(
+                app_number, extension))
     return num_thumbnails, num_full_images
 
 
@@ -87,7 +120,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("app_numbers", type=valid_app_number_pattern, nargs="+",
                         help="Application numbers to check for images. Can include single character extension numbers as well.")
-    # parser.add_argument("extension", nargs="?", default="0", type=valid_extension_number_pattern, help="Extension number for the application. Defaults to '%(default)s'")
     parser.add_argument("-e", "--environment", dest="env_name", default="DEV",
                         choices=environment.FILE_STORAGE_SERVERS.keys(), help="Environment name to check in")
     parser.add_argument("-v", "--verbose", dest="verbose", action="store_true",
@@ -116,9 +148,9 @@ if __name__ == "__main__":
             logging.debug("Found app # '{}' ext # '{}'".format(prev_number, num))
             prev_number = None
         elif len(num) == 1 and not prev_number:
-            logging.warn("Got an extension number '{}' without an application number. Ignoring....".format(num))
+            logging.warning("Got an extension number '{}' without an application number. Ignoring....".format(num))
         else:
-            logging.warn(
+            logging.warning(
                 "Got an application or extension number '{}' that is not a valid length. Ignoring....".format(num))
     if prev_number:
         app_ext_numbers.append((prev_number, "0"))
@@ -129,7 +161,7 @@ if __name__ == "__main__":
     for (app_num, ext_num) in app_ext_numbers:
         num_thumbnails, num_full_images = check_images_for_application(args.env_name, app_num, ext_num)
         if num_full_images == 0 and num_full_images == num_thumbnails:
-            logging.warn(
+            logging.warning(
                 "In the {} environment, for the application {} {}, found NO images (neither thumbnails and full images)\n".format(
                     args.env_name, app_num, ext_num))
         elif num_full_images != 0 and num_full_images == num_thumbnails:
@@ -137,7 +169,7 @@ if __name__ == "__main__":
                 "In the {} environment, for the application {} {}, found {} images (both thumbnails and full images)\n".format(
                     args.env_name, app_num, ext_num, num_full_images))
         else:
-            logging.warn(
+            logging.warning(
                 "In the {} environment, for the application {} {}, found {} thumbnails and {} full images)\n".format(
                     args.env_name, app_num, ext_num, num_thumbnails, num_full_images))
     logging.info('Log file: {}'.format(log_file_path))

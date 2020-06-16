@@ -1,14 +1,11 @@
 import datetime
 import itertools
 import logging
-import os.path
 import pathlib
 import pprint
 import re
-import sys
 import xml.etree.ElementTree as ET
 
-import git
 import requests
 from bs4 import BeautifulSoup
 
@@ -76,10 +73,10 @@ def load_pom_file(pom_path=None, pom_url=None):
             headers = {'User-Agent': 'Mozilla/5.0'}
             pom_page = requests.get(pom_url, headers=headers)
         except Exception as ex:
-            logging.warn("Could not get pom url {}. Exception {}".format(pom_url, ex.getMessage()))
+            logging.warning("Could not get pom url {}. Exception {}".format(pom_url, ex.getMessage()))
             return None
         if pom_page.status_code != requests.codes.ok:
-            logging.warn("Could not get pom url {}. status_code {}".format(pom_url, pom_page.status_code))
+            logging.warning("Could not get pom url {}. status_code {}".format(pom_url, pom_page.status_code))
             return None
         root = ET.fromstring(pom_page.text)
     else:
@@ -106,10 +103,10 @@ def load_pom_file(pom_path=None, pom_url=None):
     _el = root.find("m:parent/m:groupId", nsmap)
     group_id = "unknown" if _el is None else _el.text
     _el = root.find("m:parent/m:artifactId", nsmap)
-    artId = "unknown" if _el is None else _el.text
+    art_id = "unknown" if _el is None else _el.text
     _el = root.find("m:parent/m:version", nsmap)
     version = "unknown" if _el is None else _el.text
-    pom_info.parent = BasicArtifactInformation(group_id, artId, version)
+    pom_info.parent = BasicArtifactInformation(group_id, art_id, version)
 
     # Property variables
     properties_els = root.findall("m:properties/*", nsmap)
@@ -140,18 +137,18 @@ def load_pom_file(pom_path=None, pom_url=None):
         scope_el = dep_el.find("m:scope", nsmap)
         scope = scope_el.text if scope_el else None
         group_id = dep_el.find("m:groupId", nsmap).text
-        artId = dep_el.find("m:artifactId", nsmap).text
+        art_id = dep_el.find("m:artifactId", nsmap).text
         dep_info = DependencyInformation()
         dep_info.group_id = group_id
         dep_info.version = version
-        dep_info.artifact_id = artId
+        dep_info.artifact_id = art_id
         dep_info.scope = scope
         dep_info.type = type_val
-        pom_info.managed_dependencies["{}/{}".format(group_id, artId)] = dep_info
+        pom_info.managed_dependencies["{}/{}".format(group_id, art_id)] = dep_info
 
     # Dependencies
     dependencies_el_list = []
-    dependencies_el_list.extend(root.findall("*/m:dependencies/m:dependency", nsmap))
+    # dependencies_el_list.extend(root.findall("*/m:dependencies/m:dependency", nsmap))
     dependencies_el_list.extend(root.findall("m:dependencies/m:dependency", nsmap))
     variable_pattern = re.compile(r'\$\{([^}]*)\}')
     logging.debug(
@@ -169,12 +166,12 @@ def load_pom_file(pom_path=None, pom_url=None):
             _el = root.find("m:properties/m:{}".format(prop_name), nsmap)
             version = version if _el is None else _el.text
         group_id = dep_el.find("m:groupId", nsmap).text
-        artId = dep_el.find("m:artifactId", nsmap).text
+        art_id = dep_el.find("m:artifactId", nsmap).text
         dep_info = DependencyInformation()
         dep_info.group_id = group_id
         dep_info.version = version
-        dep_info.artifact_id = artId
-        pom_info.dependencies["{}/{}".format(group_id, artId)] = dep_info
+        dep_info.artifact_id = art_id
+        pom_info.dependencies["{}/{}".format(group_id, art_id)] = dep_info
     logging.debug("added {1} dependencies for pom for for {0.group_id} {0.artifact_id} {0.version}".format(pom_info,
                                                                                                            len(
                                                                                                                pom_info.dependencies)))
@@ -202,12 +199,12 @@ def validate_pom_dependencies(pom_info):
     snapshot_deps = [v for v in pom_info.dependencies.values() if "SNAPSHOT" in v.version.upper()]
     if len(snapshot_deps) > 0:
         if not is_snapshot:
-            logging.warn(
+            logging.warning(
                 "WARNING: a released version, {0.version}, of {0.group_id} {0.artifact_id} contains {1} SNAPSHOT dependencies!".format(
                     pom_info, len(snapshot_deps)))
         logging.info("The following {} dependencies are SNAPSHOT versions:".format(len(snapshot_deps)))
         for dep_info in snapshot_deps:
-            logging.info("    {0.group_id}/{o.artifact_id} version: {0.version}".format(dep_info))
+            logging.info("    {0.group_id}/{0.artifact_id} version: {0.version}".format(dep_info))
 
 
 def get_pom_key(pom_info=None, group_id=None, artifact_id=None, version=None):
@@ -234,7 +231,7 @@ def resolve_pom_variables(poms_info):
 
                 parent_pom_info = None
                 if len(parent_pom_infos) > 1:
-                    logging.warn(
+                    logging.warning(
                         "Found multiple parent poms with groupId {0.group_id}, artifactId {0.artifact_id} and version {0.version} for pom groupId {1.group_id}, artifactId {1.artifact_id} and version {1.version}. Using the first one ".format(
                             parent_info, pom_info))
                     parent_pom_info = parent_pom_infos[0]
@@ -267,7 +264,7 @@ def resolve_pom_variables(poms_info):
                         parent_pom_info.version, pom_info.group_id, pom_info.artifact_id, pom_info.version))
                 pom_info.version = parent_pom_info.version
             elif pom_info.version.startswith("${"):
-                grps = variable_pattern.match(pom_info.version);
+                grps = variable_pattern.match(pom_info.version)
                 if grps:
                     prop_name = grps.group(1)
                     v = parent_pom_info.properties.get(prop_name)
@@ -355,7 +352,7 @@ def resolve_pom_variables(poms_info):
                                                       version=pom_info.version)
                         mod_pom_info = None
                         if len(mod_pom_infos) > 1:
-                            logging.warn(
+                            logging.warning(
                                 "Found multiple module poms with groupId {}, artifactId {} and version {} for pom groupId {}, artifactId {} and version {}. Using the first one ".format(
                                     pom_info.group_id, mod, pom_info.version, pom_info.group_id, pom_info.artifact_id,
                                     pom_info.version))
@@ -374,7 +371,7 @@ def resolve_pom_variables(poms_info):
                                                                                                       pom_info.version))
 
         else:
-            logging.warn("None pom_info for key {}".format(pom_key))
+            logging.warning("None pom_info for key {}".format(pom_key))
     # Cannot add new entrie to a dict while iterating over it, so adding them now that for loop is completed
     poms_info.update(more_poms)
     logging.debug("Finsihed resolve_pom_variables(poms_info)\n")
@@ -387,22 +384,18 @@ def resolve_dependencies(poms_info, more_poms, pom_info, dep_key, dep, deps):
         dep_pom_infos = find_pom_info(more_poms, group_id=dep.group_id, artifact_id=dep.artifact_id,
                                       version=dep.version)
 
-    logging.debug("dependencies key: '{}'    -01- dependencies size: {}".format(dep_key, len(deps)))
     dep_pom_info = None
     if len(dep_pom_infos) > 1:
-        logging.warn(
+        logging.warning(
             "Found multiple poms for dependency with groupId {}, artifactId {} and version {} for pom groupId {}, artifactId {} and version {}. Using the first one ".format(
                 dep.group_id, dep.artifact_id, dep.version, pom_info.group_id, pom_info.artifact_id, pom_info.version))
         dep_pom_info = dep_pom_infos[0]
     elif len(dep_pom_infos) == 1:
-        logging.debug("dependencies key: '{}'    -02- dependencies size: {}".format(dep_key, len(deps)))
         dep_pom_info = dep_pom_infos[0]
     elif dep.is_locally_managed():
         # Try to get remote version from Nexus
-        logging.debug("dependencies key: '{}'    -03A- dependencies size: {}".format(dep_key, len(deps)))
         dep_pom_info = get_remote_artifact_pom(group_id=dep.group_id, artifact_id=dep.artifact_id, version=dep.version)
         if dep_pom_info:
-            logging.debug("dependencies key: '{}'    -03B- dependencies size: {}".format(dep_key, len(deps)))
             new_dep_key = get_pom_key(dep_pom_info)
             more_poms[new_dep_key] = dep_pom_info
             logging.debug(
@@ -421,11 +414,9 @@ def resolve_dependencies(poms_info, more_poms, pom_info, dep_key, dep, deps):
     if dep_pom_info:
         dep.pom_info = dep_pom_info
 
-    logging.debug("dependencies key: '{}'    -04- dependencies size: {}".format(dep_key, len(deps)))
 
-
-def resolve_missing_items(poms_info):
-    logging.debug("Starting resolve_missing_items(poms_info)\n")
+def resolve_missing_items(poms_info, count=0):
+    logging.debug("Starting resolve_missing_items(poms_info) with {} poms and count {}\n".format(len(poms_info), count))
     # Need to go through all poms to see if there are any pom variable substituions that need to be performed
     variable_pattern = re.compile(r'\$\{([^}]*)\}')
     more_poms = {}
@@ -435,8 +426,6 @@ def resolve_missing_items(poms_info):
             if pom_info.dependencies:
                 logging.debug("Starting with new pom_info.dependencies of size: {}".format(len(pom_info.dependencies)))
                 for dep_key in pom_info.dependencies.keys():
-                    logging.debug("pom_info.dependencies key: '{}'    -00- dependencies size: {}".format(dep_key, len(
-                        pom_info.dependencies)))
                     dep = pom_info.dependencies[dep_key]
                     if dep.version != "unknown" and dep.version != "unspecified":
                         resolve_dependencies(poms_info, more_poms, pom_info, dep_key, dep, pom_info.dependencies)
@@ -446,9 +435,6 @@ def resolve_missing_items(poms_info):
                 logging.debug("Starting with new pom_info.managed_dependencies of size: {}".format(
                     len(pom_info.managed_dependencies)))
                 for dep_key in pom_info.managed_dependencies.keys():
-                    logging.debug(
-                        "pom_info.managed_dependencies key: '{}'    -00- dependencies size: {}".format(dep_key, len(
-                            pom_info.managed_dependencies)))
                     dep = pom_info.managed_dependencies[dep_key]
                     if dep.version != "unknown" and dep.version != "unspecified":
                         resolve_dependencies(poms_info, more_poms, pom_info, dep_key, dep,
@@ -464,7 +450,7 @@ def resolve_missing_items(poms_info):
                         mod_pom_infos = find_pom_info(more_poms, group_id=pom_info.group_id, artifact_id=mod_key,
                                                       version=pom_info.version)
                     if len(mod_pom_infos) > 1:
-                        logging.warn(
+                        logging.warning(
                             "Found multiple poms for module with groupId {}, artifactId {} and version {} for pom groupId {}, artifactId {} and version {}. Using the first one ".format(
                                 pom_info.group_id, mod_key, pom_info.version, pom_info.group_id, pom_info.artifact_id,
                                 pom_info.version))
@@ -484,14 +470,22 @@ def resolve_missing_items(poms_info):
                                     pom_info.group_id, mod_key, pom_info.version, pom_info.group_id,
                                     pom_info.artifact_id, pom_info.version))
         else:
-            logging.warn("None pom_info for key {}".format(pom_key))
+            logging.warning("None pom_info for key {}".format(pom_key))
     # Cannot add new entries to a dict while iterating over it, so adding them now that for loop is completed
     if more_poms:
         poms_info.update(more_poms)
-        logging.debug("Found {} more poms, so calling resolve_missing_items(poms_info) again just in case!".format(
-            len(more_poms)))
-        resolve_missing_items(poms_info)
-    logging.debug("Finsihed resolve_missing_items(poms_info)\n")
+        if count < 3:
+            logging.debug(
+                "Found {} more poms, with {} existing poms, so calling resolve_missing_items(poms_info) again for the {} time just in case!\n".format(
+                    len(more_poms), len(poms_info), count + 1))
+            resolve_missing_items(poms_info, count + 1)
+        else:
+            logging.debug(
+                "Stopping recursive call resolve_missing_items(..) as it has been already called {} times".format(
+                    count))
+
+    logging.debug(
+        "Finsihed resolve_missing_items(poms_info) with count {} with {} poms\n".format(len(poms_info), count))
     return poms_info
 
 
@@ -509,13 +503,13 @@ def load_pom_files_from_workspace(root_path, validate=None):
             poms_info[pom_key] = pom_info
             logging.debug('Loaded pom with the key "{0}" from {1}'.format(pom_key, pom_info.path))
         else:
-            logging.warn(
+            logging.warning(
                 'There is already a pom with the key "{0}". Not adding the one for {1}'.format(pom_key, pom_info.path))
 
     poms_info = resolve_missing_items(poms_info)
 
-    resolve_pom_variables(poms_info)
-    resolve_pom_variables(poms_info)
+    poms_info = resolve_pom_variables(poms_info)
+    poms_info = resolve_pom_variables(poms_info)
 
     logging.debug("Finished load_pom_files_from_workspace('{}')\n".format(root_path))
     return poms_info
@@ -598,14 +592,14 @@ def get_artifact_version_from_version_page(url, group_id, artifact_id, version, 
     try:
         artifact_version_page = requests.get(url, headers=headers)
     except Exception as ex:
-        logging.warn(
+        logging.warning(
             "Could not get artifact_version url {} for group_id {} and artifact_id {}. Exception {}".format(url,
                                                                                                             group_id,
                                                                                                             artifact_id,
                                                                                                             ex.getMessage()))
         return None
     if artifact_version_page.status_code != requests.codes.ok:
-        logging.warn(
+        logging.warning(
             "Could not get artifact_version url {} for group_id {} and artifact_id {}. status_code {}".format(url,
                                                                                                               group_id,
                                                                                                               artifact_id,
@@ -614,12 +608,15 @@ def get_artifact_version_from_version_page(url, group_id, artifact_id, version, 
     return parse_artifact_version_page(artifact_version_page.text, group_id, artifact_id, version)
 
 
+unavailable_urls = []
+
+
 def get_remote_artifact_pom(pom_info=None, group_id=None, artifact_id=None, version=None):
     if pom_info:
         version = pom_info.version
         artifact_id = pom_info.artifact_id
         group_id = pom_info.group_id
-    if version in ["unknown", "unspecified"]:
+    if version in ["unknown", "unspecified"] or version.startswith("${"):
         return None
 
     group_id_path = group_id.replace(".", "/")
@@ -637,14 +634,29 @@ def get_remote_artifact_pom(pom_info=None, group_id=None, artifact_id=None, vers
             else:
                 url = artifact_versions_dict[key]["url"][:-4] + ".pom"
         else:
-            logging.warn("cannot find version page for {} {} {} at url {}".format(group_id, artifact_id, version,
+            logging.warning("cannot find version page for {} {} {} at url {}".format(group_id, artifact_id, version,
                                                                                   version_page_url))
             return None
     else:
         base_url = environment.NEXUS_INFO["released_root_url"]
         url = "{0}/{1}/{2}/{3}/{2}-{3}.pom".format(base_url, group_id_path, artifact_id, version)
-    logging.debug("For {} {} {}, created pom url: {}".format(group_id, artifact_id, version, url))
-    return load_pom_file(pom_url=url)
+    global unavailable_urls
+    if url not in unavailable_urls:
+        logging.debug(
+            "For {} {} {}, created pom url: {} which is not in {} unavailable urls".format(group_id, artifact_id,
+                                                                                           version, url,
+                                                                                           len(unavailable_urls)))
+        result = load_pom_file(pom_url=url)
+        if not result:
+            unavailable_urls.append(url)
+        return result
+    else:
+        logging.debug("For {} {} {}, created pom url: {} is not available, one of {} unavailable urls".format(group_id,
+                                                                                                              artifact_id,
+                                                                                                              version,
+                                                                                                              url, len(
+                unavailable_urls)))
+        return None
 
 
 def is_pom_version_snapshot(version_str):

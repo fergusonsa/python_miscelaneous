@@ -30,7 +30,7 @@ def search_file(jar_path, archive, library_name, check_all):
 
 def main(class_name, search_location, check_all):
     if search_location.is_dir():
-        logging.warning("Not implemented yet! {0} is a directory to search.\n".format(search_location))
+        logging.warning("Not implemented yet! {0} is a test_data to search.\n".format(search_location))
     elif search_location.is_file() and search_location.suffix in [".jar", ".war", ".ear", ".zip"]:
         with zipfile.ZipFile(search_location, 'r') as archive:
             if not search_file(search_location, archive, class_name, check_all):
@@ -52,7 +52,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("class_name", help="Java class name to search for")
     parser.add_argument("search_location", type=valid_path,
-                        help="Java archive file or directory path to search for the desired class")
+                        help="Java archive file or test_data path to search for the desired class")
     parser.add_argument("-a", dest="check_all", action="store_true",
                         help="Flag to indicate to search for all instances of library with desired name. Defaults to stop after finding only the first one")
     parser.add_argument("-v", "--verbose", dest="verbose", action="store_true",

@@ -13,7 +13,7 @@ FILENAME_PATTERN = re.compile("(?P<app_nane>[a-zA-Z-]*)_(?P<server_name>[a-zA-Z0
 
 def get_logs_from_local(env_name, app_name, timestamp, end_timestamp=None):
     '''
-        Logs are stored in a local directory with names in th eformat of <app_name>_[<server_name>_]<start-timestamp>_<end-timestamp>.log
+        Logs are stored in a local test_data with names in th eformat of <app_name>_[<server_name>_]<start-timestamp>_<end-timestamp>.log
         Example: ID-FILING_wasdev5_20200229-19331583004828_20200311-05451583905506.log
     '''
     log_dir = pathlib.Path(environment.LOCAL_LOG_DIRECTORY, env_name, app_name)
@@ -127,7 +127,7 @@ def save_log_from_url_to_file(url, env_name, app_name, server_name, log_dir):
 def copy_logs_from_remote_to_local(env_name, app_name, timestamp, end_timestamp=None):
     log_dir = pathlib.Path(environment.LOCAL_LOG_DIRECTORY, env_name, app_name)
     if not log_dir.exists():
-        logging.debug("Creating log directory {0}".format(log_dir))
+        logging.debug("Creating log test_data {0}".format(log_dir))
         log_dir.mkdir(parents=True, exist_ok=True)
     found_files = []
     if env_name == "localhost": 

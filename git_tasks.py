@@ -282,14 +282,14 @@ def prerelease_check(workspace_path_str, branch, module_name):
     module_path = root_path.joinpath(module_name)
     if not module_path.is_dir():
         logging.warning(
-            "Cannot perform pre-release check because the module {} sub-directory does not exist in the workspace {}!".format(
+            "Cannot perform pre-release check because the module {} sub-test_data does not exist in the workspace {}!".format(
                 module_name, workspace_path_str))
         return
     try:
         repo = git.Repo(module_path, search_parent_directories=True)
     except:
         logging.warning(
-            "Cannot perform pre-release check because the module {} sub-directory in the workspace {} is not a git repository!".format(
+            "Cannot perform pre-release check because the module {} sub-test_data in the workspace {} is not a git repository!".format(
                 module_name, workspace_path_str))
         return
     if repo:
@@ -475,7 +475,7 @@ if __name__ == "__main__":
     parser.add_argument("-y", "--python_workspace", dest="use_python_workspace", action="store_true",
                         help="Use the python workspace instead of the workspace argument.")
     parser.add_argument("-m", "--module", dest="module_name",
-                        help="Module to use. Must be a sub directory of the workspace directory.", )
+                        help="Module to use. Must be a sub test_data of the workspace test_data.", )
     parser.add_argument("-b", "--branch", dest="branch_name", default="develop",
                         help="Branch to compare to master branch or to checkout. Defaults to '%(default)s'.", )
     parser.add_argument("--parent_branch", dest="parent_branch_name", default="master",
@@ -585,7 +585,7 @@ if __name__ == "__main__":
                 else:
                     logging.warning("The repo path {} is not a valid git repo to check.".format(path))
             else:
-                logging.warning("The repo path {} is does not exist or is not a directory.".format(path))
+                logging.warning("The repo path {} is does not exist or is not a test_data.".format(path))
         else:
             logging.info(
                 "Checking to see if git repos in {} have their {} branch up to date with their master branch.\n\n".format(

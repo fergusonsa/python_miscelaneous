@@ -71,7 +71,7 @@ def save_dir_files_info(dir_path, output_path):
                 output_h.write("{name}  {size}  {last_modified:%Y-%m-%d %H:%M:%S}   {md5}\n".format(**file_info))
         logging.info("Wrote info for {} files to file {}".format(len(dirs_info), output_path))
     else:
-        logging.info("No file info found in the directory {}, so could not write anything to file {}"
+        logging.info("No file info found in the test_data {}, so could not write anything to file {}"
                      .format(dir_path, output_path))
 
 
@@ -96,7 +96,7 @@ def get_file_infos(dir_path):
         file_info = get_file_info(file_path)
         if file_info:
             files_info_dict[file_path.name] = file_info
-    logging.debug("Loaded info for {} files from directory {}".format(len(files_info_dict), dir_path))
+    logging.debug("Loaded info for {} files from test_data {}".format(len(files_info_dict), dir_path))
     return files_info_dict
 
 
@@ -124,11 +124,11 @@ def compare_file_against_directory_file(compare_path, dir_path):
         logging.info("{0[name]:40}  {0[size]:10}  {0[last_modified]:%Y-%m-%d %H:%M:%S}   {0[md5]}  {1[size]:10}  {1[last_modified]:%Y-%m-%d %H:%M:%S}   {1[md5]}".format(files_info[file], compare_info[file]))
     logging.info(" ")
     
-    logging.info("Number of files in directory and not in comparison file: {}\n".format(len(extra_files)))
+    logging.info("Number of files in test_data and not in comparison file: {}\n".format(len(extra_files)))
     for file in sorted(extra_files):
         logging.info("{name:40}  {size:10}  {last_modified:%Y-%m-%d %H:%M:%S}   {md5}".format(**files_info[file]))
     logging.info(" ")
-    logging.info("Number of files in comparison file and not in directory: {}\n".format(len(missing_files)))
+    logging.info("Number of files in comparison file and not in test_data: {}\n".format(len(missing_files)))
     for file in sorted(missing_files):
         logging.info("{name:40}  {size:10}  {last_modified:%Y-%m-%d %H:%M:%S}   {md5}".format(**compare_info[file]))
     logging.info(" ")
@@ -140,13 +140,13 @@ if __name__ == "__main__":
                         help="Flag to print verbose log messages.")
     parser.add_argument("-f", "--file", dest="file_path", help="File path to display information for.")
     parser.add_argument("-w", "--write", dest="write_path",
-                        help="File path to write the file info to. Used with the -d/--directory argument.")
-    parser.add_argument("-d", "--directory", dest="dir_path",
+                        help="File path to write the file info to. Used with the -d/--test_data argument.")
+    parser.add_argument("-d", "--test_data", dest="dir_path",
                         help="Directory path containing files to display information for.")
     parser.add_argument("-c", "--compare", dest="compare_path",
-                        help="File path containing the file information to compare against. Used with the -d/--directory argument.")
+                        help="File path containing the file information to compare against. Used with the -d/--test_data argument.")
     # parser.add_argument("-i", "--include", dest="include",
-    #                     help="Filter pattern for files to display information for. Used with the -d/--directory argument.")
+    #                     help="Filter pattern for files to display information for. Used with the -d/--test_data argument.")
     parser.add_argument("-o", "--open", dest="open_output", action="store_true",
                         help="Flag to indicate to open the log file(s) in an editor once the script has completed.")
     args = parser.parse_args()
@@ -189,6 +189,6 @@ if __name__ == "__main__":
                     else:
                         logging.debug("Could not get file infor for {}".format(file_path))
         else:
-            logging.error("'{}' is not a valid directory!".format(args.dir_path))
+            logging.error("'{}' is not a valid test_data!".format(args.dir_path))
     if args.open_output:
         common_utils.open_file_in_editor(log_file_path)
